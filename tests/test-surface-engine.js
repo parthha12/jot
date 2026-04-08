@@ -3,7 +3,8 @@
 const { test } = require('node:test');
 const assert   = require('node:assert/strict');
 
-const { resolveBundleIds, getEligibleNotes, APP_NAME_TO_BUNDLE_ID } = require('../surfaceEngine');
+const { resolveBundleIds, getEligibleNotes } = require('../surfaceEngine');
+const { APP_NAME_TO_BUNDLE_ID } = require('../knownApps');
 
 // ── resolveBundleIds ─────────────────────────────────────────────────────────
 
@@ -98,4 +99,21 @@ test('getEligibleNotes: no bundle IDs → empty', () => {
   };
   const eligible = getEligibleNotes('', 'UnknownApp', mockDb);
   assert.equal(eligible.length, 0);
+});
+
+// ── Source-agnostic surfacing ─────────────────────────────────────────────────
+// getNotesByAnyBundleId does not filter by source — a link is a link.
+
+test('auto-linked note is eligible for surfacing (source is irrelevant to eligibility)', () => {
+  const notes = [
+    { id: 10, title: 'Auto', content: '', surface_disabled: 0, surface_snoozed_until: null },
+  ];
+  const mockDb = {
+    // DB query returns notes regardless of link source
+    getNotesByAnyBundleId: () => notes,
+    noteEligibleForSurface: (n) => !n.surface_disabled && !n.surface_snoozed_until,
+  };
+  const eligible = getEligibleNotes('com.tinyspeck.slackmacgap', 'Slack', mockDb);
+  assert.equal(eligible.length, 1);
+  assert.equal(eligible[0].id, 10);
 });

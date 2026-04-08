@@ -10,27 +10,10 @@
  *   4. After surfacing, auto-snooze each note for cooldownMinutes.
  *
  * No external I/O — pure logic over DB helpers.
+ * Note: queries include links from BOTH 'manual' and 'auto' sources.
  */
 
-/**
- * Stable app-name → bundle-ID fallback map for apps that may not report
- * a bundle ID via System Events (rare, but possible for some sandboxed apps).
- */
-const APP_NAME_TO_BUNDLE_ID = {
-  'Messages':           'com.apple.MobileSMS',
-  'WhatsApp':           'net.whatsapp.WhatsApp',
-  'Telegram':           'ru.keepcoder.Telegram',
-  'Slack':              'com.tinyspeck.slackmacgap',
-  'Zoom':               'us.zoom.xos',
-  'Mail':               'com.apple.mail',
-  'Safari':             'com.apple.Safari',
-  'Google Chrome':      'com.google.Chrome',
-  'FaceTime':           'com.apple.FaceTime',
-  'Discord':            'com.hnc.Discord',
-  'Messenger':          'com.facebook.Messenger',
-  'Microsoft Teams':    'com.microsoft.teams2',
-  'Signal':             'org.whispersystems.signal-desktop',
-};
+const { APP_NAME_TO_BUNDLE_ID } = require('./knownApps');
 
 /**
  * Resolve canonical bundle IDs to query for a given frontmost app event.
@@ -39,10 +22,19 @@ const APP_NAME_TO_BUNDLE_ID = {
 function resolveBundleIds(bundleId, appName) {
   const ids = new Set();
   if (bundleId) ids.add(bundleId);
-  // App-name fallback: if the bundle ID didn't report anything useful,
-  // or to catch apps that have both a bundle ID and a name entry.
-  const fallback = APP_NAME_TO_BUNDLE_ID[appName];
-  if (fallback) ids.add(fallback);
+  // App-name fallback: exact match first, then case-insensitive.
+  if (appName) {
+    const exact = APP_NAME_TO_BUNDLE_ID[appName];
+    if (exact) {
+      ids.add(exact);
+    } else {
+      // Case-insensitive fallback in case System Events returns differently-cased names
+      const lower = appName.toLowerCase();
+      for (const [key, val] of Object.entries(APP_NAME_TO_BUNDLE_ID)) {
+        if (key.toLowerCase() === lower) { ids.add(val); break; }
+      }
+    }
+  }
   return [...ids];
 }
 
@@ -71,4 +63,4 @@ function recordSurfaced(notes, db, cooldownMinutes) {
   }
 }
 
-module.exports = { resolveBundleIds, getEligibleNotes, recordSurfaced, APP_NAME_TO_BUNDLE_ID };
+module.exports = { resolveBundleIds, getEligibleNotes, recordSurfaced };

@@ -41,6 +41,8 @@ function getConfig() {
     pollIntervalMs:         parseInt(process.env.PROACTIVE_RECALL_POLL_MS || '', 10) || file.pollIntervalMs || 1500,
     surfaceCooldownMinutes: parseInt(process.env.PROACTIVE_RECALL_COOLDOWN_MIN || '', 10) || file.surfaceCooldownMinutes || 30,
     overlayAutoDismissMs:   parseInt(process.env.PROACTIVE_RECALL_DISMISS_MS || '', 10) || file.overlayAutoDismissMs || 10000,
+    // Auto-link notes to apps based on keywords in title/content (default: on).
+    autoAppLinkFromText:    parseBool(process.env.PROACTIVE_RECALL_AUTO_LINK, file.autoAppLinkFromText, true),
   };
 }
 

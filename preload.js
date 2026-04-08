@@ -43,5 +43,7 @@ contextBridge.exposeInMainWorld('api', {
   onFocusSearch:     (cb) => ipcRenderer.on('focus-search', () => cb()),
   onToggleAi:        (cb) => ipcRenderer.on('toggle-ai', () => cb()),
   onOpenNote:        (cb) => ipcRenderer.on('open-note', (_e, noteId) => cb(noteId)),
-  onSurfacingToggled:(cb) => ipcRenderer.on('surfacing-toggled', (_e, enabled) => cb(enabled)),
+  onSurfacingToggled: (cb) => ipcRenderer.on('surfacing-toggled', (_e, enabled) => cb(enabled)),
+  // Fired when the auto-scanner adds new links after a save.
+  onNoteLinksUpdated: (cb) => ipcRenderer.on('note-links-updated', (_e, noteId) => cb(noteId)),
 });

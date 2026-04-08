@@ -53,9 +53,12 @@ function makeMockDb(overrides = {}) {
     createFolder:      (data)     => { const f = { id: 99, ...data, created_at: new Date().toISOString() }; folders.push(f); return f; },
     updateFolder:      (id, data) => { const f = folders.find(x => x.id === id); if (!f) return null; Object.assign(f, data); return f; },
     deleteFolder:      (id)       => { const i = folders.findIndex(f => f.id === id); if (i >= 0) folders.splice(i, 1); },
-    linkNoteToApp:     () => {},
-    unlinkNoteFromApp: () => {},
-    getLinkedBundleIds:(id) => id === 1 ? ['com.apple.MobileSMS'] : [],
+    linkNoteToApp:          (noteId, bundleId, source = 'manual') => {},
+    unlinkNoteFromApp:      () => {},
+    getLinkedBundleIds:     (id) => id === 1 ? ['com.apple.MobileSMS'] : [],
+    getLinkedAppsWithSource:(id) => id === 1 ? [{ bundle_id: 'com.apple.MobileSMS', source: 'manual' }] : [],
+    applyAutoLinks:         () => {},
+    isDismissed:            () => false,
     ...overrides,
   };
 }
@@ -77,7 +80,8 @@ function executeTool(name, input, db) {
     case 'get_note': {
       const note = db.getNoteById(input.id);
       if (!note) return { error: `Note ${input.id} not found.` };
-      return { ...note, linked_bundle_ids: db.getLinkedBundleIds(note.id) };
+      const links = db.getLinkedAppsWithSource ? db.getLinkedAppsWithSource(note.id) : db.getLinkedBundleIds(note.id);
+      return { ...note, linked_bundle_ids: links };
     }
     case 'create_note': {
       return db.createNote({ title: input.title || '', content: input.content || '', folderId: input.folder_id ?? null });
@@ -103,15 +107,18 @@ function executeTool(name, input, db) {
       return note;
     }
     case 'link_note_to_app': {
-      db.linkNoteToApp(input.note_id, input.bundle_id);
-      return { linked: { note_id: input.note_id, bundle_id: input.bundle_id } };
+      db.linkNoteToApp(input.note_id, input.bundle_id, 'manual');
+      return { linked: { note_id: input.note_id, bundle_id: input.bundle_id, source: 'manual' } };
     }
     case 'unlink_note_from_app': {
       db.unlinkNoteFromApp(input.note_id, input.bundle_id);
       return { unlinked: { note_id: input.note_id, bundle_id: input.bundle_id } };
     }
     case 'get_note_app_links': {
-      return { note_id: input.note_id, bundle_ids: db.getLinkedBundleIds(input.note_id) };
+      const links = db.getLinkedAppsWithSource
+        ? db.getLinkedAppsWithSource(input.note_id)
+        : db.getLinkedBundleIds(input.note_id).map(bid => ({ bundle_id: bid, source: 'manual' }));
+      return { note_id: input.note_id, links };
     }
     default:
       throw new Error(`Unknown tool: ${name}`);
@@ -146,12 +153,16 @@ test('search_notes: returns empty for no match', () => {
   assert.equal(result.count, 0);
 });
 
-test('get_note: returns note with linked_bundle_ids', () => {
+test('get_note: returns note with linked_bundle_ids as [{bundle_id, source}]', () => {
   const db = makeMockDb();
   const result = executeTool('get_note', { id: 1 }, db);
   assert.equal(result.id, 1);
   assert.ok(Array.isArray(result.linked_bundle_ids));
-  assert.ok(result.linked_bundle_ids.includes('com.apple.MobileSMS'));
+  // Now returns [{bundle_id, source}] objects
+  const found = result.linked_bundle_ids.some(l =>
+    (typeof l === 'string' ? l : l.bundle_id) === 'com.apple.MobileSMS'
+  );
+  assert.ok(found, 'should include com.apple.MobileSMS');
 });
 
 test('get_note: returns error for missing note', () => {
@@ -204,18 +215,20 @@ test('move_note_to_folder: moves note', () => {
   assert.equal(result.folder_id, 1);
 });
 
-test('link_note_to_app: returns confirmation', () => {
+test('link_note_to_app: returns confirmation with manual source', () => {
   const db = makeMockDb();
   const result = executeTool('link_note_to_app', { note_id: 2, bundle_id: 'net.whatsapp.WhatsApp' }, db);
   assert.ok(result.linked);
   assert.equal(result.linked.bundle_id, 'net.whatsapp.WhatsApp');
+  assert.equal(result.linked.source, 'manual');
 });
 
-test('get_note_app_links: returns bundle ids', () => {
+test('get_note_app_links: returns links with source', () => {
   const db = makeMockDb();
   const result = executeTool('get_note_app_links', { note_id: 1 }, db);
-  assert.ok(Array.isArray(result.bundle_ids));
-  assert.ok(result.bundle_ids.includes('com.apple.MobileSMS'));
+  assert.ok(Array.isArray(result.links));
+  const found = result.links.some(l => l.bundle_id === 'com.apple.MobileSMS');
+  assert.ok(found, 'should include com.apple.MobileSMS in links');
 });
 
 test('unknown tool throws', () => {

@@ -13,6 +13,9 @@ let overlayWin = null;
 // ── Overlay state ─────────────────────────────────────────────────────────────
 let overlayDismissTimer = null;
 
+// ── Scanner debounce timers (per note id) ─────────────────────────────────────
+const scanDebounceTimers = new Map();
+
 // ── App lifecycle ─────────────────────────────────────────────────────────────
 
 app.whenReady().then(() => {
@@ -199,6 +202,42 @@ function startAppWatcher() {
   });
 }
 
+// ── Note app scanner ──────────────────────────────────────────────────────────
+
+/**
+ * Debounced scanner: runs noteAppScan after a note is saved.
+ * Per-note timer so rapid typing doesn't thrash the DB.
+ */
+function scheduleScanner(noteId, note) {
+  if (scanDebounceTimers.has(noteId)) clearTimeout(scanDebounceTimers.get(noteId));
+  const timer = setTimeout(() => {
+    scanDebounceTimers.delete(noteId);
+    runScanner(noteId, note);
+  }, 600);
+  scanDebounceTimers.set(noteId, timer);
+}
+
+function runScanner(noteId, note) {
+  const config = cfg.getConfig();
+  if (!config.autoAppLinkFromText) return;
+
+  const { detectBundleIdsFromText } = require('./noteAppScan');
+  const { KNOWN_APPS }              = require('./knownApps');
+
+  const detected = detectBundleIdsFromText(note.title, note.content, KNOWN_APPS);
+  if (detected.size === 0) return;
+
+  const before = new Set(db.getLinkedBundleIds(noteId));
+  db.applyAutoLinks(noteId, detected);
+  const after  = new Set(db.getLinkedBundleIds(noteId));
+
+  // Notify renderer to refresh chips if any new links were added
+  const changed = [...after].some(id => !before.has(id));
+  if (changed) {
+    mainWin?.webContents.send('note-links-updated', noteId);
+  }
+}
+
 // ── IPC Handlers ──────────────────────────────────────────────────────────────
 
 function registerIpcHandlers() {
@@ -207,12 +246,16 @@ function registerIpcHandlers() {
   ipcMain.handle('get-note',     (_e, id)       => {
     const note = db.getNoteById(id);
     if (!note) return null;
-    const links = db.getLinkedBundleIds(id);
+    const links = db.getLinkedAppsWithSource(id);
     return { ...note, linked_bundle_ids: links };
   });
   ipcMain.handle('search-notes', (_e, query)    => db.searchNotes(query));
   ipcMain.handle('create-note',  (_e, data)     => db.createNote(data));
-  ipcMain.handle('update-note',  (_e, id, data) => db.updateNote(id, data));
+  ipcMain.handle('update-note',  (_e, id, data) => {
+    const result = db.updateNote(id, data);
+    if (result) scheduleScanner(id, result);
+    return result;
+  });
   ipcMain.handle('delete-note', (_e, id) => {
     const ok = db.moveNoteToTrash(id);
     return ok ? { deleted: id, trashed: true } : { deleted: false };
@@ -230,8 +273,8 @@ function registerIpcHandlers() {
   ipcMain.handle('enable-note-surface',  (_e, id)          => { db.enableNoteSurface(id); return true; });
 
   // App links
-  ipcMain.handle('get-linked-apps',     (_e, noteId)          => db.getLinkedBundleIds(noteId));
-  ipcMain.handle('link-note-to-app',    (_e, noteId, bundleId)=> { db.linkNoteToApp(noteId, bundleId); return true; });
+  ipcMain.handle('get-linked-apps',     (_e, noteId)          => db.getLinkedAppsWithSource(noteId));
+  ipcMain.handle('link-note-to-app',    (_e, noteId, bundleId)=> { db.linkNoteToApp(noteId, bundleId, 'manual'); return true; });
   ipcMain.handle('unlink-note-from-app',(_e, noteId, bundleId)=> { db.unlinkNoteFromApp(noteId, bundleId); return true; });
 
   // Folders
@@ -256,6 +299,7 @@ function registerIpcHandlers() {
       surfacingEnabled:      c.surfacingEnabled,
       surfaceCooldownMinutes:c.surfaceCooldownMinutes,
       overlayAutoDismissMs:  c.overlayAutoDismissMs,
+      autoAppLinkFromText:   c.autoAppLinkFromText,
     };
   });
   ipcMain.handle('save-config', (_e, key, value) => {

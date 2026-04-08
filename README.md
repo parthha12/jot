@@ -95,10 +95,44 @@ If you decline, notes and AI still work; proactive surfacing is silently disable
 
 ## Linking notes to apps (proactive surfacing)
 
+### Manual linking
+
 1. Open a note in the editor
 2. In the **"Surface when app is active"** section at the bottom, click **＋ Add app**
 3. Choose from the list of known apps (Messages, WhatsApp, Slack, etc.) or enter a custom bundle ID
 4. When you switch into that app on macOS, the note appears in a small overlay at the bottom-right corner
+
+### Auto-detection from note text
+
+When you save a note, Proactive Recall scans the title and body for app keywords and **automatically suggests links** — no API key or network call required.
+
+Examples:
+| Text in note | Auto-linked app |
+|---|---|
+| "Discuss on **Slack** with the team" | Slack |
+| "Send via **iMessage** tonight" | Messages |
+| "**WhatsApp** follow-up" | WhatsApp |
+| "Join the **Zoom call** at 3pm" | Zoom |
+| "**Microsoft Teams** sync" | Microsoft Teams |
+
+Auto-linked chips show a small **A** badge and a tooltip. They work identically to manually-linked chips for surfacing purposes.
+
+**Dismissing auto-suggestions:** Click ✕ on an auto chip to remove it. The scanner will **not** re-add it on future saves — the dismissal is stored persistently. If you want it back, add it manually via **＋ Add app** (which clears the dismissal).
+
+**Toggle:** Settings → **"Auto-suggest app links from note text"** (default: on). Turning this off stops new auto-links from being added; existing ones remain until removed.
+
+**Known limitations of auto-detection:**
+- Matching is English-centric and keyword-based; it does not understand context
+- Ambiguous short words are intentionally excluded (e.g. "wa", "sms" alone triggers Messages but "plasma" does not)
+- "Mail" alone doesn't match the Mail app (use "apple mail" or "mail app" to be unambiguous)
+- Custom/third-party apps not in the built-in catalog can only be linked manually
+
+### Chip types
+
+| Chip appearance | Source |
+|---|---|
+| Plain chip | Manually linked |
+| Chip with **A** badge | Auto-detected from note text |
 
 ### Overlay actions
 
@@ -112,9 +146,10 @@ The overlay auto-dismisses after 10 seconds if not interacted with.
 
 The same note will not be re-surfaced within 30 minutes (configurable in Settings). Switching in and out of an app rapidly will not spam you.
 
-### Surfacing toggle
+### Surfacing toggles
 
-Settings → **Proactive Surfacing** toggle switches the entire feature on or off.
+- Settings → **Proactive Surfacing** — master on/off for the overlay feature
+- Settings → **Auto-suggest app links from note text** — controls whether the scanner adds new auto-links on save
 
 ---
 
@@ -130,7 +165,8 @@ The assistant can:
 - Create, update, and delete notes
 - Create and manage folders
 - Move notes between folders
-- Link or unlink notes to apps
+- Link or unlink notes to apps (always stored as **manual** links)
+- Re-run the keyword scanner on a specific note (`scan_note_app_links`)
 
 The assistant **cannot** browse the web, fetch URLs, or access any data outside your notes library. If you ask about something not in your notes, it will say so.
 

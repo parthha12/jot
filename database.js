@@ -46,9 +46,23 @@ function getDb() {
 
   // ── Note ↔ App links ───────────────────────────────────────────────────────
   // A note can be linked to one or more bundle IDs for proactive surfacing.
+  // source: 'manual' (user or assistant) | 'auto' (scanner from note text).
+  // One row per (note_id, bundle_id) pair; manual always wins over auto.
   db.exec(`
     CREATE TABLE IF NOT EXISTS note_app_links (
       note_id   INTEGER NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
+      bundle_id TEXT NOT NULL,
+      source    TEXT NOT NULL DEFAULT 'manual',
+      PRIMARY KEY (note_id, bundle_id)
+    )
+  `);
+
+  // ── Auto-link dismissals ───────────────────────────────────────────────────
+  // When a user removes an auto-suggested link, record it here so the scanner
+  // does not re-add it on future saves. Manual links clear the dismissal.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS note_app_link_dismissals (
+      note_id   INTEGER NOT NULL,
       bundle_id TEXT NOT NULL,
       PRIMARY KEY (note_id, bundle_id)
     )
@@ -61,9 +75,18 @@ function getDb() {
 }
 
 function _migrate() {
-  const cols = getDb().pragma('table_info(notes)').map(c => c.name);
-  if (!cols.includes('deleted_at')) {
-    getDb().exec('ALTER TABLE notes ADD COLUMN deleted_at TEXT');
+  const db = getDb();
+
+  // notes: add deleted_at
+  const noteCols = db.pragma('table_info(notes)').map(c => c.name);
+  if (!noteCols.includes('deleted_at')) {
+    db.exec('ALTER TABLE notes ADD COLUMN deleted_at TEXT');
+  }
+
+  // note_app_links: add source column (existing rows default to 'manual')
+  const linkCols = db.pragma('table_info(note_app_links)').map(c => c.name);
+  if (!linkCols.includes('source')) {
+    db.exec("ALTER TABLE note_app_links ADD COLUMN source TEXT NOT NULL DEFAULT 'manual'");
   }
 }
 
@@ -210,23 +233,78 @@ function noteEligibleForSurface(note) {
 
 // ── Note ↔ App links ──────────────────────────────────────────────────────────
 
-function linkNoteToApp(noteId, bundleId) {
-  getDb()
-    .prepare('INSERT OR IGNORE INTO note_app_links (note_id, bundle_id) VALUES (?, ?)')
-    .run(noteId, bundleId);
+/**
+ * Link a note to a bundle ID.
+ * @param {string} source - 'manual' | 'auto'
+ *
+ * Upsert semantics:
+ *   - If source is 'manual': always sets source to 'manual' (wins over auto) and
+ *     clears any existing dismissal for this pair (user's explicit choice wins).
+ *   - If source is 'auto': inserts as 'auto' only if no row exists; if a 'manual'
+ *     row already exists, leaves it unchanged.
+ */
+function linkNoteToApp(noteId, bundleId, source = 'manual') {
+  const db = getDb();
+  if (source === 'manual') {
+    // Clear dismissal so scanner may re-suggest in the future if user re-removes
+    db.prepare('DELETE FROM note_app_link_dismissals WHERE note_id = ? AND bundle_id = ?')
+      .run(noteId, bundleId);
+  }
+  // Upsert: manual always wins; auto only inserts if row absent
+  db.prepare(`
+    INSERT INTO note_app_links (note_id, bundle_id, source) VALUES (?, ?, ?)
+    ON CONFLICT(note_id, bundle_id) DO UPDATE SET
+      source = CASE WHEN excluded.source = 'manual' THEN 'manual' ELSE source END
+  `).run(noteId, bundleId, source);
 }
 
+/**
+ * Unlink a note from a bundle ID.
+ * If the removed link was 'auto', records a dismissal so the scanner won't re-add it.
+ */
 function unlinkNoteFromApp(noteId, bundleId) {
-  getDb()
-    .prepare('DELETE FROM note_app_links WHERE note_id = ? AND bundle_id = ?')
+  const db = getDb();
+  const link = db.prepare('SELECT source FROM note_app_links WHERE note_id = ? AND bundle_id = ?')
+    .get(noteId, bundleId);
+  db.prepare('DELETE FROM note_app_links WHERE note_id = ? AND bundle_id = ?')
     .run(noteId, bundleId);
+  if (link && link.source === 'auto') {
+    db.prepare('INSERT OR IGNORE INTO note_app_link_dismissals (note_id, bundle_id) VALUES (?, ?)')
+      .run(noteId, bundleId);
+  }
 }
 
-function getLinkedBundleIds(noteId) {
+/** Returns [{bundle_id, source}] for the given note. */
+function getLinkedAppsWithSource(noteId) {
   return getDb()
-    .prepare('SELECT bundle_id FROM note_app_links WHERE note_id = ?')
-    .all(noteId)
-    .map(r => r.bundle_id);
+    .prepare('SELECT bundle_id, source FROM note_app_links WHERE note_id = ? ORDER BY bundle_id')
+    .all(noteId);
+}
+
+/** @deprecated Kept for internal use where only bundle IDs are needed. */
+function getLinkedBundleIds(noteId) {
+  return getLinkedAppsWithSource(noteId).map(r => r.bundle_id);
+}
+
+/** True if this (note_id, bundle_id) pair has been dismissed by the user. */
+function isDismissed(noteId, bundleId) {
+  return !!getDb()
+    .prepare('SELECT 1 FROM note_app_link_dismissals WHERE note_id = ? AND bundle_id = ?')
+    .get(noteId, bundleId);
+}
+
+/**
+ * Apply auto-detected bundle IDs to a note.
+ * Skips IDs that are dismissed. Does not remove existing links.
+ * @param {number}      noteId
+ * @param {Set<string>} detectedIds - from noteAppScan.detectBundleIdsFromText
+ */
+function applyAutoLinks(noteId, detectedIds) {
+  for (const bundleId of detectedIds) {
+    if (!isDismissed(noteId, bundleId)) {
+      linkNoteToApp(noteId, bundleId, 'auto');
+    }
+  }
 }
 
 function getNotesByBundleId(bundleId) {
@@ -281,6 +359,8 @@ function deleteFolder(id) {
 module.exports = {
   getAllNotes, getNoteById, searchNotes, createNote, updateNote, deleteNote, moveNoteToTrash, restoreNote, permanentDeleteNote, moveNoteToFolder,
   markNoteSurfaced, snoozeNoteSurface, disableNoteSurface, enableNoteSurface, noteEligibleForSurface,
-  linkNoteToApp, unlinkNoteFromApp, getLinkedBundleIds, getNotesByBundleId, getNotesByAnyBundleId,
+  linkNoteToApp, unlinkNoteFromApp, getLinkedAppsWithSource, getLinkedBundleIds,
+  isDismissed, applyAutoLinks,
+  getNotesByBundleId, getNotesByAnyBundleId,
   getAllFolders, getFolderById, createFolder, updateFolder, deleteFolder,
 };

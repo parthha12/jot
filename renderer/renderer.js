@@ -75,9 +75,10 @@ async function init() {
 }
 
 function applyConfig() {
-  $('surfacing-toggle').checked = state.config.surfacingEnabled !== false;
-  $('cooldown-input').value     = state.config.surfaceCooldownMinutes || 30;
-  $('model-input').value        = state.config.model || 'claude-sonnet-4-6';
+  $('surfacing-toggle').checked    = state.config.surfacingEnabled !== false;
+  $('cooldown-input').value        = state.config.surfaceCooldownMinutes || 30;
+  $('model-input').value           = state.config.model || 'claude-sonnet-4-6';
+  $('auto-link-toggle').checked    = state.config.autoAppLinkFromText !== false;
 }
 
 // ── Data loaders ──────────────────────────────────────────────────────────────
@@ -151,10 +152,18 @@ function renderNoteList() {
 
 function renderAppLinks() {
   appLinksBody.innerHTML = '';
-  for (const bid of state.linkedApps) {
+  for (const link of state.linkedApps) {
+    // Support both [{bundle_id, source}] objects and plain strings (fallback)
+    const bid    = typeof link === 'string' ? link : link.bundle_id;
+    const source = typeof link === 'string' ? 'manual' : (link.source || 'manual');
     const chip = document.createElement('div');
-    chip.className = 'app-chip';
-    chip.innerHTML = `<span>${esc(displayName(bid))}</span><button class="chip-remove" data-bundle="${bid}" title="Remove">×</button>`;
+    chip.className = 'app-chip' + (source === 'auto' ? ' app-chip-auto' : '');
+    chip.title = source === 'auto' ? 'Auto-detected from note text' : 'Manually linked';
+    chip.innerHTML = `
+      <span>${esc(displayName(bid))}</span>
+      ${source === 'auto' ? '<span class="chip-auto-badge" title="Auto-detected">A</span>' : ''}
+      <button class="chip-remove" data-bundle="${esc(bid)}" title="Remove">×</button>
+    `;
     appLinksBody.appendChild(chip);
   }
 }
@@ -186,6 +195,7 @@ async function selectNote(id) {
   if (!note) return;
   state.activeNote        = note;
   state.highlightedNoteId = id;
+  // linked_bundle_ids is [{bundle_id, source}] from main process
   state.linkedApps        = note.linked_bundle_ids || [];
 
   document.querySelectorAll('.note-item').forEach(el => {
@@ -456,6 +466,7 @@ async function switchFolder(folder) {
 async function addAppLink(bundleId) {
   if (!state.activeNote || !bundleId.trim()) return;
   await window.api.linkNoteToApp(state.activeNote.id, bundleId.trim());
+  // Refresh from server to get [{bundle_id, source}] with updated source
   state.linkedApps = await window.api.getLinkedApps(state.activeNote.id);
   renderAppLinks();
   updateNoteLinkedBadge();
@@ -464,7 +475,10 @@ async function addAppLink(bundleId) {
 async function removeAppLink(bundleId) {
   if (!state.activeNote) return;
   await window.api.unlinkNoteFromApp(state.activeNote.id, bundleId);
-  state.linkedApps = state.linkedApps.filter(b => b !== bundleId);
+  state.linkedApps = state.linkedApps.filter(l => {
+    const bid = typeof l === 'string' ? l : l.bundle_id;
+    return bid !== bundleId;
+  });
   renderAppLinks();
   updateNoteLinkedBadge();
 }
@@ -563,7 +577,7 @@ async function sendAiMessage() {
       // If assistant mutated notes, refresh
       const mutating = result.toolCalls?.some(t =>
         ['create_note','update_note','delete_note','move_note_to_folder','create_folder','delete_folder',
-         'update_folder','link_note_to_app','unlink_note_from_app'].includes(t.name)
+         'update_folder','link_note_to_app','unlink_note_from_app','scan_note_app_links'].includes(t.name)
       );
       if (mutating) {
         await loadFolders();
@@ -573,6 +587,7 @@ async function sendAiMessage() {
           if (refreshed) {
             noteTitleInput.value   = refreshed.title;
             noteContentInput.value = refreshed.content;
+            // linked_bundle_ids is [{bundle_id, source}]
             state.linkedApps       = refreshed.linked_bundle_ids || [];
             renderAppLinks();
           }
@@ -600,13 +615,15 @@ function closeSettings() {
 }
 
 async function saveSettings() {
-  const model    = $('model-input').value.trim() || 'claude-sonnet-4-6';
-  const cooldown = parseInt($('cooldown-input').value, 10) || 30;
-  const surfacing = $('surfacing-toggle').checked;
+  const model      = $('model-input').value.trim() || 'claude-sonnet-4-6';
+  const cooldown   = parseInt($('cooldown-input').value, 10) || 30;
+  const surfacing  = $('surfacing-toggle').checked;
+  const autoLink   = $('auto-link-toggle').checked;
 
   await window.api.saveConfig('model', model);
   await window.api.saveConfig('surfaceCooldownMinutes', cooldown);
   await window.api.saveConfig('surfacingEnabled', surfacing);
+  await window.api.saveConfig('autoAppLinkFromText', autoLink);
 
   state.config = await window.api.getConfig();
   closeSettings();
@@ -758,6 +775,14 @@ function bindEvents() {
     state.config.surfacingEnabled = enabled;
     $('surfacing-toggle').checked = enabled;
   });
+  // Refresh app link chips when the auto-scanner adds new links
+  window.api.onNoteLinksUpdated(async (noteId) => {
+    if (state.activeNote?.id === noteId) {
+      state.linkedApps = await window.api.getLinkedApps(noteId);
+      renderAppLinks();
+      updateNoteLinkedBadge();
+    }
+  });
 }
 
 async function openAddLinkModal() {
@@ -768,12 +793,16 @@ async function openAddLinkModal() {
   knownList.innerHTML = '';
 
   for (const app of KNOWN_APPS) {
+    const isLinked = state.linkedApps.some(l => {
+      const bid = typeof l === 'string' ? l : l.bundle_id;
+      return bid === app.bundleId;
+    });
     const btn = document.createElement('button');
-    btn.className = 'known-app-btn' + (state.linkedApps.includes(app.bundleId) ? ' linked' : '');
-    btn.textContent = (state.linkedApps.includes(app.bundleId) ? '✓ ' : '') + app.name;
+    btn.className = 'known-app-btn' + (isLinked ? ' linked' : '');
+    btn.textContent = (isLinked ? '✓ ' : '') + app.name;
     btn.dataset.bundleId = app.bundleId;
     btn.addEventListener('click', async () => {
-      if (state.linkedApps.includes(app.bundleId)) {
+      if (isLinked) {
         await removeAppLink(app.bundleId);
       } else {
         await addAppLink(app.bundleId);

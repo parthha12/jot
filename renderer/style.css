@@ -384,6 +384,21 @@ body { background: var(--bg); height: 100vh; overflow: hidden; display: flex; fl
   padding: 0; margin-left: 2px;
 }
 .app-chip .chip-remove:hover { color: var(--danger); }
+
+/* Auto-detected chips: slightly different border + badge */
+.app-chip-auto {
+  border-color: rgba(79,156,249,0.35);
+}
+.chip-auto-badge {
+  font-size: 9px;
+  font-weight: 700;
+  background: rgba(79,156,249,0.2);
+  color: var(--accent);
+  border-radius: 3px;
+  padding: 1px 3px;
+  margin-left: 2px;
+  letter-spacing: 0.03em;
+}
 #add-app-link-btn {
   background: none;
   border: 1px dashed var(--border);

@@ -178,11 +178,22 @@ const TOOLS = [
   },
   {
     name: 'get_note_app_links',
-    description: 'Get all app bundle IDs linked to a note.',
+    description: 'Get all app bundle IDs linked to a note, with their source (manual or auto).',
     input_schema: {
       type: 'object',
       properties: {
         note_id: { type: 'integer', description: 'Note ID.' },
+      },
+      required: ['note_id'],
+    },
+  },
+  {
+    name: 'scan_note_app_links',
+    description: 'Re-run the keyword scanner on a note and apply any new auto-detected app links. Respects dismissals and the global auto-link toggle.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        note_id: { type: 'integer', description: 'Note ID to scan.' },
       },
       required: ['note_id'],
     },
@@ -213,7 +224,7 @@ function executeTool(name, input, db) {
     case 'get_note': {
       const note = db.getNoteById(input.id);
       if (!note) return { error: `Note ${input.id} not found.` };
-      const links = db.getLinkedBundleIds(note.id);
+      const links = db.getLinkedAppsWithSource ? db.getLinkedAppsWithSource(note.id) : db.getLinkedBundleIds(note.id);
       return { ...note, linked_bundle_ids: links };
     }
     case 'create_note': {
@@ -250,16 +261,30 @@ function executeTool(name, input, db) {
       return note;
     }
     case 'link_note_to_app': {
-      db.linkNoteToApp(input.note_id, input.bundle_id);
-      return { linked: { note_id: input.note_id, bundle_id: input.bundle_id } };
+      // Tools always link as 'manual' — user's explicit intent via assistant.
+      db.linkNoteToApp(input.note_id, input.bundle_id, 'manual');
+      return { linked: { note_id: input.note_id, bundle_id: input.bundle_id, source: 'manual' } };
     }
     case 'unlink_note_from_app': {
       db.unlinkNoteFromApp(input.note_id, input.bundle_id);
       return { unlinked: { note_id: input.note_id, bundle_id: input.bundle_id } };
     }
     case 'get_note_app_links': {
-      const ids = db.getLinkedBundleIds(input.note_id);
-      return { note_id: input.note_id, bundle_ids: ids };
+      const links = db.getLinkedAppsWithSource(input.note_id);
+      return { note_id: input.note_id, links };
+    }
+    case 'scan_note_app_links': {
+      const note = db.getNoteById(input.note_id);
+      if (!note) return { error: `Note ${input.note_id} not found.` };
+      const { detectBundleIdsFromText } = require('./noteAppScan');
+      const { KNOWN_APPS }              = require('./knownApps');
+      const detected = detectBundleIdsFromText(note.title, note.content, KNOWN_APPS);
+      if (detected.size === 0) return { note_id: input.note_id, detected: [], added: [] };
+      const before = new Set(db.getLinkedBundleIds(input.note_id));
+      db.applyAutoLinks(input.note_id, detected);
+      const after  = new Set(db.getLinkedBundleIds(input.note_id));
+      const added  = [...after].filter(id => !before.has(id));
+      return { note_id: input.note_id, detected: [...detected], added };
     }
     default:
       throw new Error(`Unknown tool: ${name}`);
