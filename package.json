@@ -1,0 +1,48 @@
+{
+  "name": "proactive-recall",
+  "version": "1.0.0",
+  "description": "Local-first notes app with proactive surfacing based on frontmost app",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "test": "npm rebuild better-sqlite3 && node --test tests/test-*.js",
+    "rebuild": "electron-rebuild -f -w better-sqlite3",
+    "dist": "electron-builder --mac --publish never"
+  },
+  "build": {
+    "appId": "com.proactiverecall.app",
+    "productName": "Proactive Recall",
+    "files": [
+      "main.js",
+      "preload.js",
+      "database.js",
+      "appWatcher.js",
+      "surfaceEngine.js",
+      "assistant.js",
+      "config.js",
+      "renderer/**/*",
+      "overlay/**/*",
+      "node_modules/**/*"
+    ],
+    "asarUnpack": ["**/node_modules/better-sqlite3/**/*"],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "target": ["dmg", "zip"],
+      "extendInfo": {
+        "NSAppleEventsUsageDescription": "Proactive Recall needs to read the frontmost application to surface relevant notes."
+      }
+    }
+  },
+  "keywords": ["notes", "productivity", "electron", "macos"],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.55.0",
+    "better-sqlite3": "^12.6.2"
+  },
+  "devDependencies": {
+    "@electron/rebuild": "^4.0.3",
+    "electron": "^40.4.1",
+    "electron-builder": "^26.0.12"
+  }
+}

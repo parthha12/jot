@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy"
+    content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'" />
+  <title>Proactive Recall Overlay</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:     #1e1e1e;
+      --bg2:    #2d2d2d;
+      --border: #3a3a3a;
+      --text:   #d4d4d4;
+      --dim:    #888;
+      --accent: #4f9cf9;
+      --radius: 8px;
+    }
+
+    body {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-size: 13px;
+      color: var(--text);
+      overflow: hidden;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.6);
+    }
+
+    #header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 12px 6px;
+      border-bottom: 1px solid var(--border);
+      background: var(--bg2);
+    }
+
+    #header-label {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--dim);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    #dismiss-all {
+      background: none;
+      border: none;
+      color: var(--dim);
+      font-size: 16px;
+      cursor: pointer;
+      padding: 0 2px;
+      line-height: 1;
+    }
+    #dismiss-all:hover { color: var(--text); }
+
+    #notes-container {
+      padding: 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .note-card {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 8px 10px;
+    }
+
+    .note-card-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      margin-bottom: 3px;
+    }
+
+    .note-card-snippet {
+      font-size: 11px;
+      color: var(--dim);
+      overflow: hidden;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      line-height: 1.4;
+      margin-bottom: 8px;
+    }
+
+    .note-card-actions {
+      display: flex;
+      gap: 5px;
+    }
+
+    .action-btn {
+      flex: 1;
+      padding: 4px 6px;
+      border: none;
+      border-radius: 4px;
+      font-size: 11px;
+      cursor: pointer;
+    }
+
+    .action-btn.open    { background: #4f9cf9; color: #fff; }
+    .action-btn.open:hover { background: #3a7bd5; }
+    .action-btn.snooze  { background: var(--bg); border: 1px solid var(--border); color: var(--dim); }
+    .action-btn.snooze:hover  { color: var(--text); }
+    .action-btn.disable { background: var(--bg); border: 1px solid var(--border); color: var(--dim); }
+    .action-btn.disable:hover { color: #e05252; border-color: #e05252; }
+
+    #progress-bar {
+      height: 2px;
+      background: var(--accent);
+      width: 100%;
+      transform-origin: left;
+      animation: shrink linear forwards;
+    }
+
+    @keyframes shrink {
+      from { transform: scaleX(1); }
+      to   { transform: scaleX(0); }
+    }
+  </style>
+</head>
+<body>
+  <div id="progress-bar"></div>
+  <div id="header">
+    <span id="header-label">📌 Relevant Notes</span>
+    <button id="dismiss-all" title="Dismiss">×</button>
+  </div>
+  <div id="notes-container"></div>
+
+  <!-- External script required: CSP script-src 'self' blocks inline scripts -->
+  <script src="overlay.js"></script>
+</body>
+</html>
