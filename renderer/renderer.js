@@ -1123,6 +1123,10 @@ window.mvp.onNotesChanged(() => {
   }
 });
 
+window.mvp.onOpenAiKeyModal(() => {
+  showApiKeyModal();
+});
+
 async function init() {
   await loadApps();
   await loadFolders();

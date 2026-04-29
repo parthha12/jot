@@ -189,7 +189,7 @@ function createSearchWindow() {
     width: 760,
     height: 640,
     show: false,
-    title: 'Jot Search',
+    title: 'Jot',
     webPreferences: rendererWebPreferences(),
   });
   searchWin.on('closed', () => {
@@ -361,7 +361,7 @@ async function importExistingDbFromMenu() {
 }
 
 async function maybeShowFirstLaunchChoice() {
-  if (!db.consumeWasPackagedFirstLaunch()) return;
+  if (!db.consumeWasPackagedFirstLaunch()) return false;
   const parentWindow = searchWin || captureWin || null;
   const result = await dialog.showMessageBox(parentWindow, {
     type: 'question',
@@ -374,6 +374,28 @@ async function maybeShowFirstLaunchChoice() {
   });
   if (result.response === 1) {
     await importExistingDbFromMenu();
+  }
+  return true;
+}
+
+async function maybePromptFirstLaunchApiKeySetup(hadFirstLaunchOnboarding) {
+  if (!hadFirstLaunchOnboarding || !app.isPackaged) return;
+  const { apiKey } = aiOrganize.readAnthropicCredentials(app.getPath('userData'));
+  if (apiKey) return;
+  const parentWindow = searchWin || captureWin || null;
+  const result = await dialog.showMessageBox(parentWindow, {
+    type: 'question',
+    title: 'Set up AI organize',
+    message: 'Do you want to set your Anthropic API key now?',
+    detail: 'You can skip this and add it later from the API Key button.',
+    buttons: ['Set API Key Now', 'Later'],
+    defaultId: 0,
+    cancelId: 1,
+  });
+  if (result.response !== 0) return;
+  showSearchWindow();
+  if (searchWin && !searchWin.isDestroyed()) {
+    searchWin.webContents.send('ai:key:open-modal');
   }
 }
 
@@ -690,7 +712,8 @@ app.whenReady().then(async () => {
   registerShortcuts();
   registerIpc();
   startWatcher();
-  await maybeShowFirstLaunchChoice();
+  const hadFirstLaunchOnboarding = await maybeShowFirstLaunchChoice();
+  await maybePromptFirstLaunchApiKeySetup(hadFirstLaunchOnboarding);
 });
 
 app.on('will-quit', () => {

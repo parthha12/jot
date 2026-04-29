@@ -41,6 +41,7 @@ contextBridge.exposeInMainWorld('mvp', {
   onCaptureFocus: (cb) => ipcRenderer.on('capture:focus', () => cb()),
   onSearchFocus: (cb) => ipcRenderer.on('search:focus', (_event, payload) => cb(payload || {})),
   onNotesChanged: (cb) => ipcRenderer.on('notes-changed', () => cb()),
+  onOpenAiKeyModal: (cb) => ipcRenderer.on('ai:key:open-modal', () => cb()),
   organizeChat: (payload) => ipcRenderer.invoke('ai:organize-chat', payload),
   applyOrganizePlan: (plan) => ipcRenderer.invoke('ai:organize-apply', plan),
   getAiKeyStatus: () => ipcRenderer.invoke('ai:key:get-status'),
