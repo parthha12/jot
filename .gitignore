@@ -38,6 +38,9 @@ yarn-error.log*
 # Cursor (local / machine-specific; do not commit)
 .cursor/
 
+# Claude Code (local settings; do not commit)
+.claude/
+
 # Editor directories
 .vscode/
 .idea/

@@ -28,6 +28,8 @@ Don't want to use Terminal? See the **[full install guide](INSTALL.md)** for a n
 
 > A fully notarized build (zero extra steps) is on the roadmap — see [`docs/release-signing.md`](docs/release-signing.md).
 
+**Forks:** Download and release links in this repo point at the canonical GitHub project. After you fork, search for `github.com/parthha12/jot` in `README.md`, `INSTALL.md`, and `docs/` and replace those URLs if you ship your own releases.
+
 ## Docs
 
 - **[Purpose, stack, infra, and functionality](docs/jot-overview.md)** — start here for what Jot is and how it is built/shipped
