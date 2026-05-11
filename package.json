@@ -12,6 +12,7 @@
     "dist:arm64": "npm run clean:dist && electron-builder --mac --arm64 --publish never",
     "dist:universal": "npm run clean:dist && electron-builder --mac --universal --publish never",
     "dist:signed": "npm run clean:dist && electron-builder --mac --universal --publish never --config.mac.identity=\"Developer ID Application\"",
+    "dist:notarized": "npm run dist:signed",
     "postinstall": "electron-builder install-app-deps"
   },
   "build": {
@@ -41,6 +42,7 @@
       "gatekeeperAssess": false,
       "entitlements": "build/entitlements.mac.plist",
       "entitlementsInherit": "build/entitlements.mac.plist",
+      "artifactName": "Jot-${version}.${ext}",
       "target": [
         "dmg",
         "zip"
@@ -48,6 +50,19 @@
       "extendInfo": {
         "NSAppleEventsUsageDescription": "Jot reads the frontmost application to surface relevant notes."
       }
+    },
+    "dmg": {
+      "title": "Install Jot",
+      "artifactName": "Jot-${version}.${ext}",
+      "window": {
+        "width": 540,
+        "height": 380
+      },
+      "iconSize": 96,
+      "contents": [
+        { "x": 140, "y": 200, "type": "file" },
+        { "x": 400, "y": 200, "type": "link", "path": "/Applications" }
+      ]
     },
     "afterSign": "scripts/notarize.js"
   },
