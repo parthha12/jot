@@ -32,6 +32,8 @@
     }
 
     body {
+      display: flex;
+      flex-direction: column;
       font-family: var(--font-ui);
       font-size: 13px;
       color: var(--text);
@@ -58,6 +60,7 @@
     }
 
     #header {
+      flex-shrink: 0;
       display: flex;
       align-items: center;
       justify-content: space-between;
@@ -126,6 +129,7 @@
     #dismiss-all:hover { background: rgba(255,255,255,0.08); color: var(--text); }
 
     #progress-track {
+      flex-shrink: 0;
       height: 2px;
       background: rgba(255, 255, 255, 0.06);
       position: relative;
@@ -146,10 +150,28 @@
     }
 
     #notes-container {
+      flex: 1;
+      min-height: 0;
+      overflow-x: hidden;
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
       padding: 10px;
       display: flex;
       flex-direction: column;
       gap: 7px;
+    }
+
+    #notes-container::-webkit-scrollbar {
+      width: 8px;
+    }
+
+    #notes-container::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.22);
+      border-radius: 4px;
+    }
+
+    #notes-container::-webkit-scrollbar-track {
+      background: transparent;
     }
 
     .note-card {
@@ -204,19 +226,6 @@
       -webkit-box-orient: vertical;
       line-height: 1.45;
       margin-bottom: 9px;
-    }
-
-    .note-card-badge {
-      display: inline-flex;
-      align-items: center;
-      border: 1px solid rgba(10, 132, 255, 0.32);
-      color: #8ec5ff;
-      background: rgba(10, 132, 255, 0.12);
-      border-radius: 999px;
-      font-size: 10px;
-      letter-spacing: 0.01em;
-      padding: 2px 8px;
-      margin-bottom: 6px;
     }
 
     .note-card-meta {

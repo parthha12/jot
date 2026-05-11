@@ -1,22 +1,22 @@
 {
   "name": "jot",
-  "version": "1.0.2",
-  "description": "Local-first notes app with proactive surfacing based on frontmost app",
+  "version": "2.0.0",
+  "description": "Jot — local-first notes with proactive surfacing (Jot Launch / v2)",
   "main": "app-main.js",
   "scripts": {
     "start": "electron .",
-    "seed:screenshot": "JOT_SEED_SCREENSHOT=1 electron .",
     "test": "node --test tests/*.js",
     "rebuild": "electron-rebuild -f -w better-sqlite3",
+    "clean:dist": "rm -rf dist",
     "dist": "npm run dist:arm64",
-    "dist:arm64": "electron-builder --mac --arm64 --publish never",
-    "dist:universal": "electron-builder --mac --universal --publish never",
-    "dist:signed": "electron-builder --mac --universal --publish never --config.mac.identity=\"Developer ID Application\"",
+    "dist:arm64": "npm run clean:dist && electron-builder --mac --arm64 --publish never",
+    "dist:universal": "npm run clean:dist && electron-builder --mac --universal --publish never",
+    "dist:signed": "npm run clean:dist && electron-builder --mac --universal --publish never --config.mac.identity=\"Developer ID Application\"",
     "postinstall": "electron-builder install-app-deps"
   },
   "build": {
     "appId": "com.jot.app",
-    "productName": "jot",
+    "productName": "Jot",
     "files": [
       "app-main.js",
       "preload.js",
@@ -46,7 +46,7 @@
         "zip"
       ],
       "extendInfo": {
-        "NSAppleEventsUsageDescription": "jot needs to read the frontmost application to surface relevant notes."
+        "NSAppleEventsUsageDescription": "Jot reads the frontmost application to surface relevant notes."
       }
     },
     "afterSign": "scripts/notarize.js"

@@ -40,23 +40,94 @@ let lastSurfaceAt = 0;
 let lastSurfaceAppKey = '';
 let isImportingDb = false;
 
-let demoMode = false;
-let demoSceneIndex = 0;
-
-const DEMO_SCENES = [
-  { appKey: 'com.microsoft.VSCode',       appName: 'Visual Studio Code' },
-  { appKey: 'com.tinyspeck.slackmacgap',  appName: 'Slack' },
-  { appKey: 'com.google.Chrome',           appName: 'Google Chrome' },
-  { appKey: 'us.zoom.xos',                 appName: 'Zoom' },
-  { appKey: 'com.apple.mail',              appName: 'Mail' },
-];
-
 const APP_CONFIG = {
   maxSurfacedNotes: 3,
   minGapMsBetweenSurfacing: 15 * 1000,
   overlayDismissMs: 12000,
   defaultSnoozeMinutes: 30,
 };
+
+/** Overlay: fixed width; notes scroll inside. Height respects work area. */
+const OVERLAY_LAYOUT = {
+  width: 400,
+  preferredHeight: 400,
+  minHeight: 260,
+  marginRight: 12,
+  marginBottom: 24,
+  workAreaBottomPad: 72,
+};
+
+function layoutOverlayWindow(win) {
+  if (!win || win.isDestroyed()) return;
+  const { width: sw, height: sh } = screen.getPrimaryDisplay().workAreaSize;
+  const w = OVERLAY_LAYOUT.width;
+  const maxH = Math.max(OVERLAY_LAYOUT.minHeight, sh - OVERLAY_LAYOUT.workAreaBottomPad);
+  const h = Math.min(OVERLAY_LAYOUT.preferredHeight, maxH);
+  win.setBounds({
+    x: sw - w - OVERLAY_LAYOUT.marginRight,
+    y: sh - h - OVERLAY_LAYOUT.marginBottom,
+    width: w,
+    height: h,
+  });
+}
+
+/**
+ * macOS: showInactive() often stacks the overlay below the active app (e.g. Spotify).
+ * Show + moveTop + focus brings Jot forward; startWatcher skips when Jot is frontmost.
+ */
+function raiseOverlayWindow(win) {
+  if (!win || win.isDestroyed()) return;
+  win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  win.setAlwaysOnTop(true, 'pop-up-menu');
+  win.show();
+  win.moveTop();
+  if (process.platform === 'darwin') {
+    void app.focus({ steal: true });
+    win.focus();
+    setImmediate(() => {
+      if (win.isDestroyed()) return;
+      win.setAlwaysOnTop(true, 'pop-up-menu');
+      win.moveTop();
+      void app.focus({ steal: true });
+      win.focus();
+    });
+  }
+}
+
+/** Surfacing when our own app is frontmost would use the wrong context — skip. */
+function isJotOwningFrontBundle(bundleId) {
+  const b = String(bundleId || '');
+  if (!b) return false;
+  if (b === 'com.jot.app') return true;
+  if (!app.isPackaged && b === 'com.github.Electron') return true;
+  return false;
+}
+
+/** Activate another macOS app by bundle identifier (requires Automation permission). */
+function activateMacAppByBundleId(bundleId) {
+  if (process.platform !== 'darwin') return;
+  const bid = String(bundleId || '').trim();
+  if (!bid || !/^[a-zA-Z0-9.-]+$/.test(bid)) return;
+  try {
+    execFileSync('osascript', ['-e', `tell application id "${bid}" to activate`], {
+      encoding: 'utf8',
+      timeout: 3000,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+  } catch {
+    /* App not running, automation denied, or invalid id */
+  }
+}
+
+/**
+ * Overlay steals OS focus so it stacks above the surfaced-from app; restore it when
+ * closing Done / Snooze / Disable / dismiss-all — but not when user taps Open (main UI).
+ */
+function restoreFrontmostAppAfterOverlay(bundleKey) {
+  const bid = String(bundleKey || lastSurfaceAppKey || '').trim();
+  if (!bid) return;
+  setTimeout(() => activateMacAppByBundleId(bid), 60);
+}
 
 /** Lets the search renderer load attachments without file:// or huge data: IPC payloads. */
 protocol.registerSchemesAsPrivileged([
@@ -248,14 +319,11 @@ function createSearchWindow() {
 
 function getOverlayWindow() {
   if (overlayWin && !overlayWin.isDestroyed()) return overlayWin;
-  const { width: sw, height: sh } = screen.getPrimaryDisplay().workAreaSize;
   overlayWin = new BrowserWindow({
-    width: 400,
-    height: 260,
+    width: OVERLAY_LAYOUT.width,
+    height: OVERLAY_LAYOUT.preferredHeight,
     transparent: true,
     backgroundColor: '#00000000',
-    x: sw - 375,
-    y: sh - 240,
     frame: false,
     show: false,
     resizable: false,
@@ -269,6 +337,7 @@ function getOverlayWindow() {
       nodeIntegration: false,
     },
   });
+  layoutOverlayWindow(overlayWin);
   overlayWin.setAlwaysOnTop(true, 'pop-up-menu');
   overlayWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   overlayWin.loadFile(path.join(__dirname, 'overlay', 'overlay.html'));
@@ -279,30 +348,51 @@ function getOverlayWindow() {
 }
 
 /**
- * Prefer the display of the frontmost app's focused window (where the user is working).
- * Falls back to the mouse cursor, then primary display, if System Events is unavailable.
+ * Point used to pick which display to center Jot windows on.
+ * Uses the frontmost *other* app's main window when possible; if the frontmost app is
+ * Jot itself (stale frame on another Space), uses the mouse so ⌘P opens on the Space
+ * you're actually using.
  */
 function getPlacementAnchorPoint() {
   if (process.platform === 'darwin') {
     try {
       const script = [
         'tell application "System Events"',
-        '  tell (first process whose frontmost is true)',
-        '    tell window 1',
+        '  set frontApp to first application process whose frontmost is true',
+        '  try',
+        '    set bid to bundle identifier of frontApp',
+        '  on error',
+        '    set bid to ""',
+        '  end try',
+        '  try',
+        '    tell window 1 of frontApp',
         '      set px to item 1 of position',
         '      set py to item 2 of position',
         '      set sw to item 1 of size',
         '      set sh to item 2 of size',
-        '      return (px as text) & "," & (py as text) & "," & (sw as text) & "," & (sh as text)',
+        '      return bid & "||||" & (px as text) & "," & (py as text) & "," & (sw as text) & "," & (sh as text)',
         '    end tell',
-        '  end tell',
+        '  on error',
+        '    return bid & "||||"',
+        '  end try',
         'end tell',
       ].join('\n');
       const out = execFileSync('osascript', ['-e', script], { encoding: 'utf8', timeout: 800 }).trim();
-      const parts = out.split(',').map((p) => Number(String(p).trim()));
-      if (parts.length === 4 && parts.every((n) => Number.isFinite(n))) {
-        const [x, y, w, h] = parts;
-        return { x: Math.round(x + w / 2), y: Math.round(y + h / 2) };
+      const sep = '||||';
+      const i = out.indexOf(sep);
+      if (i >= 0) {
+        const bid = out.slice(0, i).trim();
+        const rest = out.slice(i + sep.length).trim();
+        if (bid && isJotOwningFrontBundle(bid)) {
+          return screen.getCursorScreenPoint();
+        }
+        if (rest) {
+          const parts = rest.split(',').map((p) => Number(String(p).trim()));
+          if (parts.length === 4 && parts.every((n) => Number.isFinite(n))) {
+            const [x, y, w, h] = parts;
+            return { x: Math.round(x + w / 2), y: Math.round(y + h / 2) };
+          }
+        }
       }
     } catch {
       /* Accessibility off, menu bar app with no window, etc. */
@@ -325,13 +415,49 @@ function centerWindowOnContextDisplay(win) {
   win.setPosition(x, y);
 }
 
+/**
+ * Place capture just under (or above) the main Jot window so it stays on the same
+ * Space / display as the user’s Jot session. Falls back to centerWindowOnContextDisplay
+ * when search is missing (e.g. edge startup).
+ */
+function positionCaptureNearSearchWindow() {
+  if (!captureWin || captureWin.isDestroyed()) return;
+  if (!searchWin || searchWin.isDestroyed()) {
+    centerWindowOnContextDisplay(captureWin);
+    return;
+  }
+  const sb = searchWin.getBounds();
+  if (sb.width < 32 || sb.height < 32) {
+    centerWindowOnContextDisplay(captureWin);
+    return;
+  }
+  const gap = 10;
+  const cb = captureWin.getBounds();
+  const cx = Math.round(sb.x + sb.width / 2);
+  const cy = Math.round(sb.y + sb.height / 2);
+  const display = screen.getDisplayNearestPoint({ x: cx, y: cy }) || screen.getPrimaryDisplay();
+  const area = display.workArea || display.bounds;
+
+  let x = Math.round(sb.x + (sb.width - cb.width) / 2);
+  let y = Math.round(sb.y + sb.height + gap);
+  if (y + cb.height > area.y + area.height) {
+    y = Math.round(sb.y - gap - cb.height);
+  }
+  if (y < area.y) {
+    y = Math.round(area.y + (area.height - cb.height) / 2);
+  }
+  x = Math.max(area.x, Math.min(x, area.x + area.width - cb.width));
+  y = Math.max(area.y, Math.min(y, area.y + area.height - cb.height));
+  captureWin.setPosition(x, y);
+}
+
 function showCaptureWindow() {
   if (!captureWin || captureWin.isDestroyed()) createCaptureWindow();
 
   const present = () => {
     if (!captureWin || captureWin.isDestroyed()) return;
     captureWin.show();
-    centerWindowOnContextDisplay(captureWin);
+    positionCaptureNearSearchWindow();
     captureWin.focus();
     captureWin.webContents.send('capture:focus');
   };
@@ -349,8 +475,15 @@ function showSearchWindow(payload = {}) {
 
   const present = () => {
     if (!searchWin || searchWin.isDestroyed()) return;
-    searchWin.show();
+    if (process.platform === 'darwin' && searchWin.isVisible()) {
+      searchWin.hide();
+    }
     centerWindowOnContextDisplay(searchWin);
+    searchWin.show();
+    if (process.platform === 'darwin') {
+      void app.focus({ steal: true });
+      searchWin.moveTop();
+    }
     searchWin.focus();
     searchWin.webContents.send('search:focus', payload);
   };
@@ -361,53 +494,6 @@ function showSearchWindow(payload = {}) {
 
 function hideSearchWindow() {
   if (searchWin && !searchWin.isDestroyed()) searchWin.hide();
-}
-
-function triggerDemoScene(index) {
-  const scene = DEMO_SCENES[index % DEMO_SCENES.length];
-  const picked = surface.pickSurfacedNotes({
-    bundleId: scene.appKey,
-    appName: scene.appName,
-    db,
-    catalog: KNOWN_APPS,
-    limit: APP_CONFIG.maxSurfacedNotes,
-    recentTransitions: [],
-  });
-  // Bypass the surfacing gap check for demo mode
-  lastSurfaceAt = 0;
-  lastSurfaceAppKey = '';
-  if (picked.notes.length > 0) {
-    showOverlay(scene.appKey, picked.notes, scene.appName);
-  }
-}
-
-function startDemoMode() {
-  demoMode = true;
-  demoSceneIndex = 0;
-  const seeded = db.seedDemoData();
-  notifySearchNotesChanged();
-  return seeded;
-}
-
-function triggerWorkflowDemo(workflowId) {
-  const isMeeting = workflowId === 'meeting';
-  const scene = isMeeting
-    ? { appKey: 'us.zoom.xos', appName: 'Zoom' }
-    : { appKey: 'com.microsoft.VSCode', appName: 'Visual Studio Code' };
-  const picked = surface.pickSurfacedNotes({
-    bundleId: scene.appKey,
-    appName: scene.appName,
-    db,
-    catalog: KNOWN_APPS,
-    limit: APP_CONFIG.maxSurfacedNotes,
-    recentTransitions: [],
-  });
-  lastSurfaceAt = 0;
-  lastSurfaceAppKey = '';
-  if (picked.notes.length > 0) {
-    showOverlay(scene.appKey, picked.notes, scene.appName);
-  }
-  return { workflowId: isMeeting ? 'meeting' : 'engineering', notes: picked.notes.length };
 }
 
 function showOverlay(appKey, notes, appNameOverride) {
@@ -421,8 +507,7 @@ function showOverlay(appKey, notes, appNameOverride) {
   db.recordSurfaceEventBatch(noteIds, appKey, 'surfaced');
 
   const win = getOverlayWindow();
-  const { width: sw, height: sh } = screen.getPrimaryDisplay().workAreaSize;
-  win.setPosition(sw - 395, sh - 260);
+  layoutOverlayWindow(win);
 
   const payload = {
     appKey,
@@ -431,17 +516,13 @@ function showOverlay(appKey, notes, appNameOverride) {
       id: note.id,
       text: note.text,
       participants: db.listParticipantsForNote(note.id),
-      workflow:
-        appKey === 'us.zoom.xos' || appKey === 'com.apple.mail' ? 'meeting' : 'engineering',
     })),
     autoDismissMs: APP_CONFIG.overlayDismissMs,
   };
   const send = () => {
     if (win.isDestroyed()) return;
-    win.setAlwaysOnTop(true, 'pop-up-menu');
     win.webContents.send('overlay-show', payload);
-    win.showInactive();
-    win.moveTop();
+    raiseOverlayWindow(win);
   };
   if (win.webContents.isLoading()) win.webContents.once('did-finish-load', send);
   else send();
@@ -451,11 +532,22 @@ function hideOverlay() {
   if (overlayWin && !overlayWin.isDestroyed()) overlayWin.hide();
 }
 
+/** Remove one card from the overlay UI; overlay calls `overlay-empty` when no cards remain. */
+function sendOverlayRemoveCard(noteId) {
+  const id = Number(noteId);
+  if (!Number.isFinite(id)) return;
+  const win = overlayWin;
+  if (!win || win.isDestroyed()) return;
+  win.webContents.send('overlay-remove-card', { noteId: id });
+}
+
+function finishOverlaySession() {
+  hideOverlay();
+  restoreFrontmostAppAfterOverlay(lastSurfaceAppKey);
+}
+
 function registerShortcuts() {
   globalShortcut.register('CommandOrControl+P', () => showSearchWindow());
-  globalShortcut.register('CommandOrControl+Shift+D', () => {
-    triggerWorkflowDemo('engineering');
-  });
 }
 
 async function importExistingDbFromMenu() {
@@ -675,6 +767,7 @@ function startWatcher() {
   watcher.startWatcher({
     getConfig: () => ({ surfacingEnabled: true }),
     onAppSwitch: (bundleId, appName) => {
+      if (isJotOwningFrontBundle(bundleId)) return;
       const picked = surface.pickSurfacedNotes({
         bundleId,
         appName,
@@ -991,20 +1084,25 @@ function registerIpc() {
   ipcMain.on('overlay-snooze', (_event, noteId, appKey, minutes) => {
     db.recordSurfaceEvent(noteId, appKey, 'snoozed');
     db.snoozeNote(noteId, appKey, Number(minutes) || APP_CONFIG.defaultSnoozeMinutes);
-    hideOverlay();
+    sendOverlayRemoveCard(noteId);
   });
   ipcMain.on('overlay-complete', (_event, noteId) => {
     db.recordSurfaceEvent(noteId, lastSurfaceAppKey, 'completed');
     db.completeNote(noteId);
-    hideOverlay();
     notifySearchNotesChanged();
+    sendOverlayRemoveCard(noteId);
   });
   ipcMain.on('overlay-disable', (_event, noteId, appKey) => {
     db.recordSurfaceEvent(noteId, appKey, 'dismissed');
     db.dismissNote(noteId, appKey);
-    hideOverlay();
+    sendOverlayRemoveCard(noteId);
   });
-  ipcMain.on('overlay-dismiss-all', hideOverlay);
+  ipcMain.on('overlay-empty', () => {
+    finishOverlaySession();
+  });
+  ipcMain.on('overlay-dismiss-all', () => {
+    finishOverlaySession();
+  });
 }
 
 app.whenReady().then(async () => {
@@ -1042,25 +1140,12 @@ app.whenReady().then(async () => {
   db.listFolders(); // triggers getDb() → logs path, runs migration if needed
   console.log('[app] DB path:', db.getDbPath());
 
-  if (process.env.JOT_SEED_SCREENSHOT === '1') {
-    try {
-      const summary = db.seedScreenshotDemoState();
-      console.log('[seed] screenshot demo data written:', summary);
-    } catch (err) {
-      console.error('[seed] failed:', err);
-      process.exitCode = 1;
-    }
-    app.quit();
-    return;
-  }
-
-  createCaptureWindow();
   createSearchWindow();
+  createCaptureWindow();
   buildAppMenu();
   registerShortcuts();
   registerIpc();
   startWatcher();
-  startDemoMode();
   const hadFirstLaunchOnboarding = await maybeShowFirstLaunchChoice();
   await maybePromptFirstLaunchApiKeySetup(hadFirstLaunchOnboarding);
 });
@@ -1071,8 +1156,8 @@ app.on('will-quit', () => {
 });
 
 app.on('activate', () => {
-  if (!captureWin || captureWin.isDestroyed()) createCaptureWindow();
   if (!searchWin || searchWin.isDestroyed()) createSearchWindow();
+  if (!captureWin || captureWin.isDestroyed()) createCaptureWindow();
 });
 
 app.on('window-all-closed', () => {

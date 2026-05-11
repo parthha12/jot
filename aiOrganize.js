@@ -53,7 +53,7 @@ function buildOrganizeSnapshot(database) {
   return { folders, notes };
 }
 
-const ORGANIZE_SYSTEM = `You help organize notes into folders for the app "Proactive Recall".
+const ORGANIZE_SYSTEM = `You help organize notes into folders for the app "Jot".
 The user sends a JSON snapshot: "folders" [{id, name}] and "notes" [{id, preview, folderId}].
 
 Reply with a single JSON object only (no markdown fences). Shape:

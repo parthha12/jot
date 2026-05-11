@@ -94,10 +94,10 @@ function resolveDbPath() {
     return canonical;
   }
 
-  // Legacy candidates in priority order (most-data-first):
-  //   1. proactive-recall/proactive-recall.db  – full historical dataset
+  // Legacy on-disk paths from earlier app names (migration only; do not remove).
+  //   1. proactive-recall/proactive-recall.db
   //   2. Proactive Recall/proactive-recall.db  – uppercase macOS variant
-  //   3. jot/jot.db                            – old filename used by pre-rename packaged app
+  //   3. jot.db under userData
   const legacyCandidates = [
     path.join(userData, 'proactive-recall.db'),
     path.join(appSupport, 'proactive-recall', 'proactive-recall.db'),
@@ -267,6 +267,30 @@ function migrateNoteAppLinksToCompositeKey() {
   database.exec('ALTER TABLE note_app_links_new RENAME TO note_app_links');
 }
 
+/** Exact `notes.text` values from an older bundled sample set (no longer inserted). Safe to delete if still present (FK cascades). */
+const LEGACY_OBSOLETE_SAMPLE_NOTE_TEXTS = Object.freeze([
+  'API edge-case: oauth callback fails when state payload exceeds 2KB',
+  'TODO before deploy: add retry/backoff around sync API and bump timeout to 8s',
+  'Debug note: auth bug only reproduces with stale local session from previous branch',
+  'Architecture context: capture -> SQLite -> surface engine -> overlay, keep this slide concise',
+  'Docs link to open while coding: API v2 migration checklist + schema notes',
+  'Meeting prep: ACME pilot kickoff agenda (success metrics, timeline, blockers)',
+  'Prior summary: ACME asked for SOC2 roadmap and SSO timeline, follow up today',
+  'Sales context: Expansion opportunity depends on reducing onboarding time under 10 min',
+  'Post-meeting action items draft for ACME + owner assignments',
+  'Customer call reminder: open case study deck and pricing one-pager before joining',
+]);
+
+function purgeObsoleteSampleNotesIfPresent() {
+  const database = getDb();
+  const placeholders = LEGACY_OBSOLETE_SAMPLE_NOTE_TEXTS.map(() => '?').join(',');
+  const stmt = database.prepare(`DELETE FROM notes WHERE text IN (${placeholders})`);
+  const info = stmt.run(...LEGACY_OBSOLETE_SAMPLE_NOTE_TEXTS);
+  if (info.changes > 0) {
+    console.log('[db] removed', info.changes, 'obsolete sample note row(s)');
+  }
+}
+
 function getDb() {
   if (db) return db;
   const dbPath = resolveDbPath();
@@ -360,6 +384,9 @@ function getDb() {
     }
   }
 
+  // After merges: drop any rows that still match the old bundled sample set (upgrades / merged DBs).
+  purgeObsoleteSampleNotesIfPresent();
+
   return db;
 }
 
@@ -397,11 +424,17 @@ function migrateLegacy() {
     database.exec(
       "UPDATE note_app_links SET app_key = 'com.apple.AppStore' WHERE lower(app_key) IN ('app store', 'appstore', 'mac app store')"
     );
+    database.exec(
+      "UPDATE note_app_links SET app_key = 'com.microsoft.VSCode' WHERE lower(app_key) IN ('vsc', 'vs code')"
+    );
   }
   if (linkCols.includes('bundle_id')) {
     database.exec("UPDATE note_app_links SET bundle_id = 'com.spotify.client' WHERE lower(bundle_id) = 'spotify'");
     database.exec(
       "UPDATE note_app_links SET bundle_id = 'com.apple.AppStore' WHERE lower(bundle_id) IN ('app store', 'appstore', 'mac app store')"
+    );
+    database.exec(
+      "UPDATE note_app_links SET bundle_id = 'com.microsoft.VSCode' WHERE lower(bundle_id) IN ('vsc', 'vs code')"
     );
   }
 
@@ -414,12 +447,25 @@ function migrateLegacy() {
       PRIMARY KEY (folder_id, app_key)
     );
   `);
+  database.exec(
+    "UPDATE folder_app_links SET app_key = 'com.microsoft.VSCode' WHERE lower(app_key) IN ('vsc', 'vs code')"
+  );
 
   const surfaceCols = database.pragma('table_info(note_surface_state)').map((c) => c.name);
   if (surfaceCols.includes('app_key')) {
     database.exec("UPDATE note_surface_state SET app_key = 'com.spotify.client' WHERE lower(app_key) = 'spotify'");
     database.exec(
       "UPDATE note_surface_state SET app_key = 'com.apple.AppStore' WHERE lower(app_key) IN ('app store', 'appstore', 'mac app store')"
+    );
+    database.exec(
+      "UPDATE note_surface_state SET app_key = 'com.microsoft.VSCode' WHERE lower(app_key) IN ('vsc', 'vs code')"
+    );
+  }
+
+  const seCols = database.pragma('table_info(surface_events)').map((c) => c.name);
+  if (seCols.includes('app_key')) {
+    database.exec(
+      "UPDATE surface_events SET app_key = 'com.microsoft.VSCode' WHERE lower(app_key) IN ('vsc', 'vs code')"
     );
   }
 
@@ -1096,111 +1142,6 @@ function consumeWasPackagedFirstLaunch() {
   return value;
 }
 
-const SCREENSHOT_SEED_FOLDERS = [
-  'App Ideas & Tech',
-  'Entertainment',
-  'Personal',
-  'Philosophy & Life',
-  'Tasks & Reminders',
-];
-
-/** Demo dataset matching the Apr 29, 2026 Jot Search screenshot (folder counts + note list). */
-const SCREENSHOT_SEED_NOTES = [
-  { text: 'group pic', at: '2026-04-29 12:03:00', folder: 'Personal' },
-  {
-    text: "it's a chicken or the egg scenario because you are who u surround yourself with",
-    at: '2026-04-29 08:53:00',
-    folder: 'Philosophy & Life',
-  },
-  {
-    text: 'workflow to cmd+b an app and download it if it doesnt exist',
-    at: '2026-04-29 08:40:00',
-    folder: 'App Ideas & Tech',
-  },
-  {
-    text: 'consuming is appreciate geniuses at their art',
-    at: '2026-04-29 06:29:00',
-    folder: 'Philosophy & Life',
-  },
-  {
-    text: 'learn through words / simplicity cuz it is more optimal. reduce noise.',
-    at: '2026-04-29 05:44:00',
-    folder: 'Philosophy & Life',
-  },
-  {
-    text: 'life is about the past, present, future. the now and memory and anticipation.',
-    at: '2026-04-29 05:40:00',
-    folder: 'Philosophy & Life',
-  },
-  {
-    text: 'rick and morty episode whatever we watched tonight about nothing matters',
-    at: '2026-04-29 05:31:00',
-    folder: 'Entertainment',
-  },
-  {
-    text: 'build chatbot that has knowledge of the UI and features of an app',
-    at: '2026-04-29 03:48:00',
-    folder: 'App Ideas & Tech',
-  },
-  {
-    text: 'tray icon with last 5 jots and one-click capture',
-    at: '2026-04-29 02:30:00',
-    folder: 'App Ideas & Tech',
-  },
-  {
-    text: 'sync folder diagram colors to calendar blocks for timeboxing',
-    at: '2026-04-29 02:00:00',
-    folder: 'App Ideas & Tech',
-  },
-];
-
-/**
- * Clears user tables and inserts the screenshot demo dataset. Call via
- * `JOT_SEED_SCREENSHOT=1 electron .` (quit other instances first).
- * @returns {{ notes: number, folders: number, dbPath: string }}
- */
-function seedScreenshotDemoState() {
-  const database = getDb();
-  const dbPath = _resolvedDbPath || '';
-
-  database.exec(`
-    DELETE FROM note_surface_state;
-    DELETE FROM note_app_links;
-    DELETE FROM note_images;
-    DELETE FROM note_files;
-    DELETE FROM folder_app_links;
-    DELETE FROM notes;
-    DELETE FROM folders;
-  `);
-
-  const insertFolder = database.prepare(
-    "INSERT INTO folders (name, created_at) VALUES (?, '2026-04-29 00:00:00')"
-  );
-  /** @type {Record<string, number>} */
-  const folderIdByName = {};
-  for (const name of SCREENSHOT_SEED_FOLDERS) {
-    const r = insertFolder.run(name);
-    folderIdByName[name] = Number(r.lastInsertRowid);
-  }
-
-  const insertNote = database.prepare(`
-    INSERT INTO notes (text, created_at, updated_at, folder_id)
-    VALUES (?, ?, ?, ?)
-  `);
-
-  for (const row of SCREENSHOT_SEED_NOTES) {
-    const fid = folderIdByName[row.folder];
-    if (fid == null) throw new Error(`seed: unknown folder ${row.folder}`);
-    insertNote.run(row.text, row.at, row.at, fid);
-  }
-
-  return {
-    notes: SCREENSHOT_SEED_NOTES.length,
-    folders: SCREENSHOT_SEED_FOLDERS.length,
-    dbPath,
-  };
-}
-
 function recordSurfaceEvent(noteId, appKey, eventType) {
   try {
     getDb()
@@ -1245,62 +1186,12 @@ function getNoteSurfaceScore(noteId, appKey) {
   }
 }
 
-const DEMO_SCENES = [
-  { appKey: 'com.microsoft.VSCode',       appName: 'Visual Studio Code' },
-  { appKey: 'com.tinyspeck.slackmacgap',  appName: 'Slack' },
-  { appKey: 'com.google.Chrome',           appName: 'Google Chrome' },
-  { appKey: 'us.zoom.xos',                 appName: 'Zoom' },
-  { appKey: 'com.apple.mail',              appName: 'Mail' },
-];
-
-const DEMO_SEED_NOTES = [
-  { text: 'API edge-case: oauth callback fails when state payload exceeds 2KB', appKey: 'com.microsoft.VSCode' },
-  { text: 'TODO before deploy: add retry/backoff around sync API and bump timeout to 8s', appKey: 'com.microsoft.VSCode' },
-  { text: 'Debug note: auth bug only reproduces with stale local session from previous branch', appKey: 'com.microsoft.VSCode' },
-  { text: 'Architecture context: capture -> SQLite -> surface engine -> overlay, keep this slide concise', appKey: 'com.google.Chrome' },
-  { text: 'Docs link to open while coding: API v2 migration checklist + schema notes', appKey: 'com.google.Chrome' },
-  { text: 'Meeting prep: ACME pilot kickoff agenda (success metrics, timeline, blockers)', appKey: 'us.zoom.xos', participants: ['Ava Patel', 'Liam Chen'] },
-  { text: 'Prior summary: ACME asked for SOC2 roadmap and SSO timeline, follow up today', appKey: 'us.zoom.xos', participants: ['Ava Patel', 'Jordan Kim'] },
-  { text: 'Sales context: Expansion opportunity depends on reducing onboarding time under 10 min', appKey: 'us.zoom.xos', participants: ['Jordan Kim'] },
-  { text: 'Post-meeting action items draft for ACME + owner assignments', appKey: 'com.apple.mail', participants: ['Ava Patel', 'Jordan Kim', 'Liam Chen'] },
-  { text: 'Customer call reminder: open case study deck and pricing one-pager before joining', appKey: 'us.zoom.xos', participants: ['Maya Singh'] },
-];
-
-function seedDemoData() {
-  const database = getDb();
-  const dbPath = _resolvedDbPath;
-
-  const deleteLinks = database.prepare('DELETE FROM note_app_links WHERE note_id IN (SELECT id FROM notes WHERE text IN (' + DEMO_SEED_NOTES.map(() => '?').join(',') + '))');
-  const deleteNotes = database.prepare('DELETE FROM notes WHERE text IN (' + DEMO_SEED_NOTES.map(() => '?').join(',') + ')');
-  const texts = DEMO_SEED_NOTES.map(n => n.text);
-
-  const insertNote = database.prepare("INSERT INTO notes (text, created_at, updated_at) VALUES (?, datetime('now'), datetime('now'))");
-  const insertLink = database.prepare('INSERT OR IGNORE INTO note_app_links (note_id, app_key) VALUES (?, ?)');
-  const insertParticipant = database.prepare('INSERT OR IGNORE INTO note_participants (note_id, participant) VALUES (?, ?)');
-
-  const seed = database.transaction(() => {
-    deleteLinks.run(...texts);
-    deleteNotes.run(...texts);
-    for (const note of DEMO_SEED_NOTES) {
-      const info = insertNote.run(note.text);
-      insertLink.run(info.lastInsertRowid, note.appKey);
-      for (const person of note.participants || []) {
-        insertParticipant.run(info.lastInsertRowid, String(person || '').trim());
-      }
-    }
-  });
-
-  seed();
-  return { notes: DEMO_SEED_NOTES.length, dbPath };
-}
-
 module.exports = {
   getDbPath,
   consumeWasPackagedFirstLaunch,
   closeDb,
   importDbFromFile,
   exportDbToFile,
-  seedScreenshotDemoState,
   createNote,
   updateNote,
   deleteNote,
@@ -1341,7 +1232,6 @@ module.exports = {
   listParticipantsForNote,
   addParticipantToNote,
   removeParticipantFromNote,
-  seedDemoData,
   snoozeNote,
   dismissNote,
 };

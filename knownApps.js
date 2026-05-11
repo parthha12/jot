@@ -17,7 +17,11 @@ const KNOWN_APPS = [
   { name: 'Google Chrome', bundleId: 'com.google.Chrome', aliases: ['browser', 'chrome', 'web'] },
   { name: 'ChatGPT Atlas', bundleId: 'com.openai.atlas', aliases: ['chatgpt', 'atlas', 'chatgpt atlas', 'openai'] },
   { name: 'Spotify', bundleId: 'com.spotify.client', aliases: ['spotify', 'music'] },
-  { name: 'Visual Studio Code', bundleId: 'com.microsoft.VSCode', aliases: ['code', 'vscode', 'debug', 'repo'] },
+  {
+    name: 'Visual Studio Code',
+    bundleId: 'com.microsoft.VSCode',
+    aliases: ['code', 'vscode', 'vsc', 'vs code', 'visual studio code', 'debug', 'repo'],
+  },
 ];
 
 const BUNDLE_ID_TO_NAME = Object.fromEntries(KNOWN_APPS.map((a) => [a.bundleId, a.name]));

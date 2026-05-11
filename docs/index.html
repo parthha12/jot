@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Jot — Memory layer for deep work</title>
+  <meta name="description" content="Jot automatically surfaces your notes when you need them — as you switch between apps. Built for knowledge workers who can't afford to lose context." />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #09090b;
+      --surface: #111113;
+      --surface2: #1a1a1e;
+      --border: rgba(255,255,255,0.08);
+      --text: #fafafa;
+      --muted: #71717a;
+      --accent: #0a84ff;
+      --accent-glow: rgba(10, 132, 255, 0.15);
+      --font: -apple-system, 'SF Pro Display', 'Inter', 'Segoe UI', sans-serif;
+      --font-mono: 'SF Mono', 'Fira Code', monospace;
+      --radius: 12px;
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font);
+      -webkit-font-smoothing: antialiased;
+      min-height: 100vh;
+      line-height: 1.6;
+    }
+
+    /* NAV */
+    nav {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 28px 24px 0;
+    }
+
+    .nav-logo {
+      font-size: 18px;
+      font-weight: 700;
+      letter-spacing: -0.03em;
+      color: var(--text);
+      text-decoration: none;
+    }
+
+    .nav-links {
+      display: flex;
+      gap: 24px;
+      align-items: center;
+    }
+
+    .nav-links a {
+      font-size: 14px;
+      color: var(--muted);
+      text-decoration: none;
+      transition: color 0.15s;
+    }
+    .nav-links a:hover { color: var(--text); }
+
+    /* HERO */
+    .hero {
+      max-width: 760px;
+      margin: 0 auto;
+      padding: 100px 24px 80px;
+      text-align: center;
+    }
+
+    .hero-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--accent);
+      background: var(--accent-glow);
+      border: 1px solid rgba(10, 132, 255, 0.25);
+      border-radius: 100px;
+      padding: 5px 14px;
+      margin-bottom: 32px;
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+    }
+
+    .hero-badge::before {
+      content: '';
+      width: 6px;
+      height: 6px;
+      background: var(--accent);
+      border-radius: 50%;
+    }
+
+    h1 {
+      font-size: clamp(36px, 6vw, 60px);
+      font-weight: 700;
+      letter-spacing: -0.04em;
+      line-height: 1.1;
+      color: var(--text);
+      margin-bottom: 24px;
+    }
+
+    h1 em {
+      font-style: normal;
+      background: linear-gradient(135deg, #0a84ff 0%, #5ac8fa 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .hero-sub {
+      font-size: clamp(16px, 2.5vw, 20px);
+      color: var(--muted);
+      max-width: 520px;
+      margin: 0 auto 44px;
+      line-height: 1.6;
+    }
+
+    /* WAITLIST FORM */
+    .waitlist-form {
+      display: flex;
+      gap: 10px;
+      max-width: 440px;
+      margin: 0 auto;
+    }
+
+    .waitlist-form input[type="email"] {
+      flex: 1;
+      padding: 13px 18px;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      color: var(--text);
+      font-size: 15px;
+      font-family: var(--font);
+      outline: none;
+      transition: border-color 0.15s;
+    }
+
+    .waitlist-form input[type="email"]::placeholder { color: var(--muted); }
+    .waitlist-form input[type="email"]:focus { border-color: var(--accent); }
+
+    .waitlist-form button {
+      padding: 13px 24px;
+      background: var(--accent);
+      border: none;
+      border-radius: 10px;
+      color: #fff;
+      font-size: 15px;
+      font-weight: 600;
+      font-family: var(--font);
+      cursor: pointer;
+      white-space: nowrap;
+      transition: filter 0.15s;
+    }
+    .waitlist-form button:hover { filter: brightness(1.1); }
+
+    /* FEATURES */
+    .features {
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 0 24px 100px;
+    }
+
+    .features-label {
+      text-align: center;
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--muted);
+      margin-bottom: 48px;
+    }
+
+    .features-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 20px;
+    }
+
+    .feature-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 28px;
+      transition: border-color 0.2s;
+    }
+    .feature-card:hover { border-color: rgba(255,255,255,0.16); }
+
+    .feature-icon {
+      font-size: 28px;
+      margin-bottom: 16px;
+    }
+
+    .feature-title {
+      font-size: 16px;
+      font-weight: 600;
+      margin-bottom: 10px;
+      letter-spacing: -0.02em;
+    }
+
+    .feature-desc {
+      font-size: 14px;
+      color: var(--muted);
+      line-height: 1.6;
+    }
+
+    /* HOW IT WORKS */
+    .how-section {
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 0 24px 100px;
+    }
+
+    .section-title {
+      font-size: 28px;
+      font-weight: 700;
+      letter-spacing: -0.03em;
+      text-align: center;
+      margin-bottom: 48px;
+    }
+
+    .steps {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 32px;
+    }
+
+    .step {
+      text-align: center;
+    }
+
+    .step-num {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 36px;
+      height: 36px;
+      background: var(--accent-glow);
+      border: 1px solid rgba(10,132,255,0.3);
+      border-radius: 50%;
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--accent);
+      margin-bottom: 16px;
+    }
+
+    .step-title {
+      font-size: 15px;
+      font-weight: 600;
+      margin-bottom: 8px;
+    }
+
+    .step-desc {
+      font-size: 13px;
+      color: var(--muted);
+      line-height: 1.6;
+    }
+
+    /* CTA */
+    .cta-section {
+      max-width: 600px;
+      margin: 0 auto;
+      padding: 0 24px 120px;
+      text-align: center;
+    }
+
+    .cta-section h2 {
+      font-size: clamp(28px, 4vw, 40px);
+      font-weight: 700;
+      letter-spacing: -0.03em;
+      margin-bottom: 16px;
+    }
+
+    .cta-section p {
+      font-size: 16px;
+      color: var(--muted);
+      margin-bottom: 36px;
+    }
+
+    /* FOOTER */
+    footer {
+      border-top: 1px solid var(--border);
+      padding: 32px 24px;
+      text-align: center;
+      font-size: 13px;
+      color: var(--muted);
+    }
+
+    footer a { color: var(--muted); text-decoration: none; }
+    footer a:hover { color: var(--text); }
+
+    @media (max-width: 600px) {
+      .waitlist-form { flex-direction: column; }
+      .hero { padding: 60px 20px 60px; }
+    }
+  </style>
+</head>
+<body>
+
+  <nav>
+    <a href="/" class="nav-logo">Jot</a>
+    <div class="nav-links">
+      <a href="https://github.com/parthha12/jot" target="_blank" rel="noreferrer">GitHub</a>
+    </div>
+  </nav>
+
+  <section class="hero">
+    <div class="hero-badge">Proactive memory layer</div>
+    <h1>Your notes.<br /><em>When you need them.</em></h1>
+    <p class="hero-sub">
+      Jot watches your active app and surfaces the right note in a small overlay when you switch context.
+      Everything is stored locally on your Mac; AI helpers are optional if you add your own API key.
+    </p>
+    <div class="waitlist-form" style="justify-content: center;">
+      <a href="https://github.com/parthha12/jot/releases/latest" style="display:inline-block;padding:13px 24px;background:var(--accent);border-radius:10px;color:#fff;font-size:15px;font-weight:600;text-decoration:none;font-family:var(--font);">Download for macOS</a>
+    </div>
+  </section>
+
+  <section class="features">
+    <p class="features-label">Why Jot</p>
+    <div class="features-grid">
+      <div class="feature-card">
+        <div class="feature-icon">⚡</div>
+        <div class="feature-title">Proactive, not reactive</div>
+        <div class="feature-desc">Jot detects your active app and surfaces relevant notes automatically — no search required.</div>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">🔒</div>
+        <div class="feature-title">Local-first</div>
+        <div class="feature-desc">Notes and attachments live in SQLite and on disk. No account required. Optional AI calls Anthropic only when you configure a key.</div>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">⌘</div>
+        <div class="feature-title">Keyboard-first</div>
+        <div class="feature-desc">⌘P opens search from anywhere. ⌘N opens capture from the main window. Snooze or dismiss overlays from the keyboard.</div>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">🧠</div>
+        <div class="feature-title">Gets smarter</div>
+        <div class="feature-desc">Notes you open get ranked higher next time. The more you use it, the more accurate the surfacing.</div>
+      </div>
+    </div>
+  </section>
+
+  <section class="how-section">
+    <h2 class="section-title">How it works</h2>
+    <div class="steps">
+      <div class="step">
+        <div class="step-num">1</div>
+        <div class="step-title">Capture a thought</div>
+        <div class="step-desc">Open search (⌘P), then capture (⌘N). Link to an app or use “remind me this: … when i open this …”.</div>
+      </div>
+      <div class="step">
+        <div class="step-num">2</div>
+        <div class="step-title">Switch to that app</div>
+        <div class="step-desc">Jot watches your workflow. When you open Slack, Zoom, VS Code — it knows.</div>
+      </div>
+      <div class="step">
+        <div class="step-num">3</div>
+        <div class="step-title">Note appears instantly</div>
+        <div class="step-desc">A beautiful overlay surfaces your most relevant notes — right when you need them.</div>
+      </div>
+      <div class="step">
+        <div class="step-num">4</div>
+        <div class="step-title">Never lose context</div>
+        <div class="step-desc">Open it, snooze it, or mark it done. Your memory layer works silently in the background.</div>
+      </div>
+    </div>
+  </section>
+
+  <section class="cta-section">
+    <h2>Built for knowledge workers</h2>
+    <p>PMs, engineers, founders, researchers — anyone who switches between 5+ apps a day and can't afford to lose context.</p>
+    <div class="waitlist-form" style="max-width: 100%; justify-content: center;">
+      <a href="https://github.com/parthha12/jot/releases/latest" style="display:inline-block;padding:13px 24px;background:var(--accent);border-radius:10px;color:#fff;font-size:15px;font-weight:600;text-decoration:none;font-family:var(--font);">Download latest release</a>
+    </div>
+  </section>
+
+  <footer>
+    <p>© 2026 Jot &nbsp;·&nbsp; <a href="https://github.com/parthha12/jot" target="_blank" rel="noreferrer">Open source</a> &nbsp;·&nbsp; Built for macOS</p>
+  </footer>
+
+</body>
+</html>

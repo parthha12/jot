@@ -21,12 +21,50 @@ function setFocus(index) {
   const cards = getCards();
   cards.forEach((c, i) => c.classList.toggle('focused', i === index));
   focusedIndex = index;
+  const card = cards[index];
+  if (card) {
+    card.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }
 }
 
 function getFocusedId() {
   const cards = getCards();
   const card = cards[focusedIndex];
   return card ? Number(card.dataset.id) : null;
+}
+
+function restartProgressAnimation() {
+  const fill = document.getElementById('progress-fill');
+  fill.style.animation = 'none';
+  fill.offsetHeight; // force reflow
+  fill.style.animationDuration = `${autoDismissMs}ms`;
+  fill.style.animation = `shrink ${autoDismissMs}ms linear forwards`;
+}
+
+function removeCardByNoteId(noteId) {
+  const cards = getCards();
+  const removedIdx = cards.findIndex((c) => Number(c.dataset.id) === noteId);
+  if (removedIdx < 0) return;
+
+  const wasFocused = removedIdx === focusedIndex;
+  cards[removedIdx].remove();
+
+  const remaining = getCards();
+  cardCount = remaining.length;
+
+  if (remaining.length === 0) {
+    focusedIndex = -1;
+    window.overlay.notifyEmpty();
+    return;
+  }
+
+  if (removedIdx < focusedIndex) {
+    focusedIndex--;
+  } else if (wasFocused || focusedIndex >= remaining.length) {
+    focusedIndex = Math.min(Math.max(0, focusedIndex), remaining.length - 1);
+  }
+  setFocus(focusedIndex);
+  restartProgressAnimation();
 }
 
 window.overlay.onShow((payload) => {
@@ -36,12 +74,7 @@ window.overlay.onShow((payload) => {
   focusedIndex = notes.length > 0 ? 0 : -1;
   cardCount = notes.length;
 
-  // Reset and restart progress bar
-  const fill = document.getElementById('progress-fill');
-  fill.style.animation = 'none';
-  fill.offsetHeight; // force reflow
-  fill.style.animationDuration = `${autoDismissMs}ms`;
-  fill.style.animation = `shrink ${autoDismissMs}ms linear forwards`;
+  restartProgressAnimation();
 
   // Update app name in header
   document.getElementById('header-app').textContent = payload.appName || 'Jot';
@@ -57,7 +90,6 @@ window.overlay.onShow((payload) => {
     const participantLine = participants.length > 0
       ? `<div class="note-card-meta">${participants.slice(0, 3).map((p) => `@${esc(p)}`).join(' · ')}</div>`
       : '';
-    const workflowLabel = note.workflow === 'meeting' ? 'Meeting Context' : 'Engineering Context';
 
     const card = document.createElement('div');
     card.className = 'note-card' + (idx === 0 ? ' focused' : '');
@@ -65,7 +97,6 @@ window.overlay.onShow((payload) => {
     card.style.animationDelay = `${idx * 55}ms`;
     card.innerHTML = `
       <div class="note-card-title">${title}</div>
-      <div class="note-card-badge">${workflowLabel}</div>
       <div class="note-card-snippet">${snippet}</div>
       ${participantLine}
       <div class="note-card-actions">
@@ -76,6 +107,12 @@ window.overlay.onShow((payload) => {
     `;
     container.appendChild(card);
   });
+});
+
+window.overlay.onRemoveCard((payload) => {
+  const noteId = Number((payload && payload.noteId) ?? NaN);
+  if (!Number.isFinite(noteId)) return;
+  removeCardByNoteId(noteId);
 });
 
 window.overlay.onDismiss(() => {

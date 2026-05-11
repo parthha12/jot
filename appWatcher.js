@@ -6,8 +6,8 @@
  * Polls every ~1.5 s via AppleScript (System Events) to read the bundle ID
  * and display name of the currently active application.
  *
- * Requires: System Preferences → Privacy → Automation → allow Proactive Recall
- * to control System Events (macOS will prompt on first use).
+ * Requires: System Settings → Privacy & Security → Automation → allow **Jot**
+ * (may appear as **jot**) to control System Events (macOS prompts on first use).
  *
  * Fires onAppSwitch(bundleId, appName) when the frontmost app changes.
  * No browser URL scraping, no screen capture, no OCR.
