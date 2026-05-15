@@ -1,8 +1,8 @@
 'use strict';
 
 /**
- * Main process: tray-less MVP with three windows (capture, search, overlay) + app watcher.
- * Flows: ⌘P search, ⌘N capture (from search), quick capture save, note CRUD/links, overlay actions,
+ * Main process: tray-less MVP with windows (capture, search, overlay) + app watcher.
+ * Flows: ⌘P search, ⌘T new Google Chrome tab, ⌘N capture (from search), quick capture save, note CRUD/links, overlay actions,
  * frontmost-app polling → surfaceEngine → overlay.
  */
 
@@ -19,7 +19,7 @@ const {
   protocol,
   session,
 } = require('electron');
-const { execFileSync } = require('child_process');
+const { execFileSync, spawnSync } = require('child_process');
 const fs = require('fs/promises');
 const path = require('path');
 const { pathToFileURL } = require('url');
@@ -117,6 +117,47 @@ function activateMacAppByBundleId(bundleId) {
   } catch {
     /* App not running, automation denied, or invalid id */
   }
+}
+
+/** Open a new tab in Google Chrome (not an in-app browser). macOS uses AppleScript. */
+function openGoogleChromeNewTab() {
+  if (process.platform === 'darwin') {
+    const script = [
+      'tell application "Google Chrome"',
+      '  activate',
+      '  if (count of windows) is 0 then',
+      '    make new window',
+      '  else',
+      '    make new tab at end of tabs of window 1',
+      '  end if',
+      'end tell',
+    ].join('\n');
+    try {
+      execFileSync('osascript', ['-e', script], {
+        encoding: 'utf8',
+        timeout: 8000,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+    } catch (_error) {
+      console.warn('[app] openGoogleChromeNewTab: is Google Chrome installed? Automation allowed?');
+    }
+    return;
+  }
+
+  if (process.platform === 'win32') {
+    const r = spawnSync('cmd', ['/c', 'start', '', 'chrome', 'chrome://newtab/'], {
+      stdio: 'ignore',
+      windowsHide: true,
+    });
+    if (r.error) console.warn('[app] openGoogleChromeNewTab (win):', r.error.message || r.error);
+    return;
+  }
+
+  for (const bin of ['google-chrome-stable', 'google-chrome', 'chromium-browser', 'chromium']) {
+    const r = spawnSync(bin, ['chrome://newtab/'], { stdio: 'ignore' });
+    if (!r.error && (r.status === 0 || r.status === null)) return;
+  }
+  console.warn('[app] openGoogleChromeNewTab: no Chrome/Chromium binary found in PATH');
 }
 
 /**
@@ -548,6 +589,7 @@ function finishOverlaySession() {
 
 function registerShortcuts() {
   globalShortcut.register('CommandOrControl+P', () => showSearchWindow());
+  globalShortcut.register('CommandOrControl+T', () => openGoogleChromeNewTab());
 }
 
 async function importExistingDbFromMenu() {
@@ -751,7 +793,19 @@ function buildAppMenu() {
     },
     {
       label: 'Window',
-      submenu: [{ role: 'minimize' }, { role: 'zoom' }, { role: 'togglefullscreen' }],
+      submenu: [
+        {
+          label: 'New Google Chrome Tab',
+          accelerator: 'CommandOrControl+T',
+          click: () => {
+            openGoogleChromeNewTab();
+          },
+        },
+        { type: 'separator' },
+        { role: 'minimize' },
+        { role: 'zoom' },
+        { role: 'togglefullscreen' },
+      ],
     },
   ];
   if (process.platform === 'darwin') {

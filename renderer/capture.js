@@ -40,17 +40,18 @@ function resetCaptureForm() {
   if (captureFolderSelect) captureFolderSelect.value = 'unfiled';
 }
 
-async function applyManualFolder(noteId) {
-  if (!captureFolderSelect) return;
-  const sel = captureFolderSelect.value || 'unfiled';
+async function applyManualFolder(noteId, folderValue) {
+  if (!captureFolderSelect && folderValue === undefined) return;
+  const sel =
+    folderValue !== undefined ? folderValue : (captureFolderSelect?.value || 'unfiled');
   if (sel === 'unfiled') return;
   await window.mvp.setNoteFolder(noteId, sel);
 }
 
-async function maybeAiFileNote(noteId) {
-  if (captureFolderSelect && captureFolderSelect.value && captureFolderSelect.value !== 'unfiled') {
-    return;
-  }
+async function maybeAiFileNote(noteId, folderValue) {
+  const fv =
+    folderValue !== undefined ? folderValue : (captureFolderSelect?.value || 'unfiled');
+  if (fv && fv !== 'unfiled') return;
   await fileNoteWithAi(noteId);
 }
 
@@ -77,13 +78,17 @@ function noteTextWithFallback(text) {
   return hasPending ? '(attachment)' : '';
 }
 
-async function attachPendingToNote(noteId) {
-  for (const dataUrl of pendingImageDataUrls) {
+async function attachPendingArraysToNote(noteId, imageDataUrls, fileAttachments) {
+  for (const dataUrl of imageDataUrls) {
     await window.mvp.addNoteImageFromDataUrl(noteId, dataUrl);
   }
-  for (const file of pendingFileAttachments) {
+  for (const file of fileAttachments) {
     await window.mvp.addNoteFileFromDataUrl(noteId, file.dataUrl, file.fileName, file.fileExt);
   }
+}
+
+async function attachPendingToNote(noteId) {
+  await attachPendingArraysToNote(noteId, pendingImageDataUrls, pendingFileAttachments);
   pendingImageDataUrls = [];
   pendingFileAttachments = [];
 }
@@ -117,44 +122,64 @@ async function fileNoteWithAi(noteId) {
   }
 }
 
+async function buildSavePayloadFromDraft() {
+  const text = noteTextWithFallback(input.value);
+  if (!text) return null;
+  const rawInputValue = String(input.value || '');
+  let saveText = text;
+  let appRaw = String(appInput.value || '');
+
+  let parsed = null;
+  if (/^remind\s+me\s+this\s*:/i.test(rawInputValue.trim())) {
+    try {
+      parsed = await window.mvp.parseRemindWorkflow(rawInputValue);
+    } catch {
+      parsed = null;
+    }
+  }
+
+  if (parsed && parsed.reminderText && parsed.appQuery) {
+    saveText = parsed.reminderText;
+    appRaw = parsed.appQuery;
+    appInput.value = appRaw;
+  }
+
+  const folderValue = captureFolderSelect?.value || 'unfiled';
+  return {
+    saveText,
+    appRaw,
+    folderValue,
+    images: [...pendingImageDataUrls],
+    files: pendingFileAttachments.map((f) => ({
+      dataUrl: f.dataUrl,
+      fileName: f.fileName,
+      fileExt: f.fileExt,
+    })),
+  };
+}
+
+async function runCaptureSavePipeline(payload) {
+  const appKey = await window.mvp.resolveAppKey(payload.appRaw);
+  const note = await window.mvp.saveCapture(payload.saveText, appKey);
+  if (!note?.id) return;
+  await attachPendingArraysToNote(note.id, payload.images, payload.files);
+  await applyManualFolder(note.id, payload.folderValue);
+  await maybeAiFileNote(note.id, payload.folderValue);
+}
+
 async function submit() {
   if (captureBusy) return;
-  const text = noteTextWithFallback(input.value);
-  if (!text) {
+  const payload = await buildSavePayloadFromDraft();
+  if (!payload) {
     window.mvp.hideCapture();
     return;
   }
   captureBusy = true;
   try {
-    const rawInputValue = String(input.value || '');
-    let saveText = text;
-    let appRaw = String(appInput.value || '');
-
-    // Support "remind me this: ... when i open this <app>" shorthand.
-    // This lets you create many app-linked reminder notes quickly.
-    let parsed = null;
-    if (/^remind\s+me\s+this\s*:/i.test(rawInputValue.trim())) {
-      try {
-        parsed = await window.mvp.parseRemindWorkflow(rawInputValue);
-      } catch {
-        parsed = null;
-      }
-    }
-
-    if (parsed && parsed.reminderText && parsed.appQuery) {
-      saveText = parsed.reminderText;
-      appRaw = parsed.appQuery;
-      appInput.value = appRaw; // keep UI aligned with what we parsed
-    }
-
-    const appKey = await window.mvp.resolveAppKey(appRaw);
-    const note = await window.mvp.saveCapture(saveText, appKey);
-    if (note?.id) {
-      await attachPendingToNote(note.id);
-      await applyManualFolder(note.id);
-      await maybeAiFileNote(note.id);
-    }
+    await runCaptureSavePipeline(payload);
     resetCaptureForm();
+    pendingImageDataUrls = [];
+    pendingFileAttachments = [];
     window.mvp.hideCapture();
   } finally {
     captureBusy = false;
@@ -164,12 +189,25 @@ async function submit() {
 async function handleEscape() {
   const hasText = input.value.trim().length > 0;
   const hasPending = pendingImageDataUrls.length > 0 || pendingFileAttachments.length > 0;
-  if (hasText || hasPending) {
-    await submit();
+  if (!hasText && !hasPending) {
+    resetCaptureForm();
+    window.mvp.hideCapture();
     return;
   }
+  if (captureBusy) return;
+  const payload = await buildSavePayloadFromDraft();
+  if (!payload) {
+    resetCaptureForm();
+    pendingImageDataUrls = [];
+    pendingFileAttachments = [];
+    window.mvp.hideCapture();
+    return;
+  }
+  pendingImageDataUrls = [];
+  pendingFileAttachments = [];
   resetCaptureForm();
   window.mvp.hideCapture();
+  void runCaptureSavePipeline(payload).catch(() => {});
 }
 
 input.addEventListener('keydown', async (event) => {
